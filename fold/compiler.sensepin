@@ -408,6 +408,10 @@ fn idiv_reg(a: unit, dest: i64) -> unit
   return ff(a, 247, 7, dest)
 end
 
+fn imul_reg(a: unit, dest: i64, src: i64) -> unit
+  return emit(a, rex_prefix(1, dest, src) ++ byte(15) ++ byte(175) ++ byte(modrm(3, dest, src)))
+end
+
 fn xpush(a: unit, dest: i64) -> unit
   let extra = ""
   let rx = rex_byte(0, 0, dest, 0)
@@ -842,6 +846,8 @@ set a = cmp_reg_imm8(a, 1, 27)
 set a = je(a, "op_field_n")
 set a = cmp_reg_imm8(a, 1, 28)
 set a = je(a, "op_field_text")
+set a = cmp_reg_imm8(a, 1, 15)
+set a = je(a, "op_mul")
 set a = cmp_reg_imm8(a, 1, 16)
 set a = je(a, "op_div")
 set a = cmp_reg_imm8(a, 1, 24)
@@ -1922,6 +1928,15 @@ end
 
 fn emit_span(src: unit) -> unit
   let a = src
+  set a = label(a, "op_mul")
+  set a = call_label(a, "pop_cell")
+  set a = mov_reg_mem(a, 12, 3, 8)
+  set a = call_label(a, "pop_cell")
+  set a = mov_reg_mem(a, 0, 3, 8)
+  set a = imul_reg(a, 0, 12)
+  set a = jo(a, "fail_empty")
+  set a = call_label(a, "push_i64")
+  set a = jmp_label(a, "dispatch")
   set a = label(a, "op_div")
   set a = call_label(a, "pop_cell")
   set a = mov_reg_mem(a, 12, 3, 8)
@@ -2332,7 +2347,12 @@ fn lex(text: bytes) -> list tok
                                             set toks = push(toks, tok(20, 0, ""))
                                             set i = i + 1 else fail "math"
                                           else
-                                            fail "bad character"
+                                            if c == 42
+                                              set toks = push(toks, tok(21, 0, ""))
+                                              set i = i + 1 else fail "math"
+                                            else
+                                              fail "bad character"
+                                            end
                                           end
                                         end
                                       end
@@ -2770,9 +2790,20 @@ fn parse_pair(p: prog, toks: list tok, pos: i64, op: i64, outk: i64) -> parsed
   return parsed(done, a2.pos + 1 else fail "math", outk)
 end
 
+fn product_op(toks: list tok, pos: i64) -> i64
+  if tok_is(toks, pos, 21)
+    return 15
+  end
+  if tok_is(toks, pos, 20)
+    return 16
+  end
+  return 0
+end
+
 fn parse_product(p: prog, toks: list tok, pos: i64) -> parsed
   let cur = parse_atom(p, toks, pos)
-  while tok_is(toks, cur.pos, 20)
+  let op = product_op(toks, cur.pos)
+  while op != 0
     if cur.kind != 1
       fail "type"
     end
@@ -2780,8 +2811,9 @@ fn parse_product(p: prog, toks: list tok, pos: i64) -> parsed
     if right.kind != 1
       fail "type"
     end
-    let done = emit_iffail(take_code(right.prog, byte(16)))
+    let done = emit_iffail(take_code(right.prog, byte(op)))
     set cur = parsed(done, right.pos, 1)
+    set op = product_op(toks, cur.pos)
   end
   return cur
 end
@@ -2789,7 +2821,13 @@ end
 fn parse_sum(p: prog, toks: list tok, pos: i64) -> parsed
   let cur = parse_product(p, toks, pos)
   while tok_is(toks, cur.pos, 4)
-    let right = parse_atom(cur.prog, toks, cur.pos + 1 else fail "math")
+    if cur.kind != 1
+      fail "type"
+    end
+    let right = parse_product(cur.prog, toks, cur.pos + 1 else fail "math")
+    if right.kind != 1
+      fail "type"
+    end
     let added = emit_add(right.prog)
     set cur = parsed(added, right.pos, 1)
   end
