@@ -22,8 +22,13 @@ def run(cmd: list[str], timeout: int = 30) -> subprocess.CompletedProcess[bytes]
         return subprocess.CompletedProcess(cmd, 124, out, err or b"timeout")
 
 
-def clang_exe(c_path: Path, exe: Path) -> subprocess.CompletedProcess[bytes]:
-    return run([*CLANG, "-o", str(exe), "--", str(c_path)])
+def clang_unit(c_path: Path, exe: Path) -> subprocess.CompletedProcess[bytes]:
+    return run([*CLANG, "-I", str(ROOT), "-o", str(exe), "--", str(c_path)])
+
+
+def clang_program(c_path: Path, exe: Path) -> subprocess.CompletedProcess[bytes]:
+    lib = foldc.stage_dll(exe)
+    return run([*CLANG, "-I", str(ROOT), "-o", str(exe), "--", str(c_path), str(lib)])
 
 
 def compile_fold(name: str, source: str) -> tuple[Path, Path]:
@@ -35,16 +40,22 @@ def compile_fold(name: str, source: str) -> tuple[Path, Path]:
         c_path.write_text(foldc.compile_text(source), encoding="utf-8")
     except foldc.FoldError as exc:
         raise SystemExit(f"{name} failed to compile: {exc}") from exc
-    built = clang_exe(c_path, exe)
+    built = clang_program(c_path, exe)
     if built.returncode != 0:
         sys.stderr.buffer.write(built.stderr)
         raise SystemExit(f"{name} failed to clang")
     return c_path, exe
 
 
-def expect_error(label: str, source: str, needle: str, failures: list[str]) -> None:
+def expect_error(
+    label: str,
+    source: str,
+    needle: str,
+    failures: list[str],
+    origin: Path | None = None,
+) -> None:
     try:
-        foldc.compile_text(source)
+        foldc.compile_text(source, origin)
     except foldc.FoldError as exc:
         if needle not in str(exc):
             failures.append(f"{label}: {exc} does not mention {needle}")
@@ -404,7 +415,7 @@ end
 
     unit_c = ROOT / "stress_runtime.c"
     unit_exe = BUILD / "stress_runtime.exe"
-    built = clang_exe(unit_c, unit_exe)
+    built = clang_unit(unit_c, unit_exe)
     if built.returncode != 0:
         sys.stderr.buffer.write(built.stderr)
         failures.append("runtime unit failed to clang")
@@ -412,6 +423,352 @@ end
         check("runtime unit", run([str(unit_exe)]), 0, b"", b"", failures)
         wrapped = run([str(unit_exe), "wrap"], timeout=10)
         check("arena wrap", wrapped, 1, b"", b"out of memory\n", failures)
+
+    try:
+        foldc.compile_text("phase console\nfn id(n: f64) -> f64\n  return n\nend\nfn main\nend\n")
+    except foldc.FoldError as exc:
+        failures.append(f"a typed f64 function with no arithmetic was rejected: {exc}")
+    try:
+        foldc.compile_text(
+            "phase console\nfn id(n: list i64) -> list i64\n  return n\nend\nfn main\nend\n"
+        )
+    except foldc.FoldError as exc:
+        failures.append(f"a typed list function with no list gauge was rejected: {exc}")
+    try:
+        foldc.compile_text(
+            "phase console\nfn id(n: map i64 i64) -> map i64 i64\n  return n\nend\nfn main\nend\n"
+        )
+    except foldc.FoldError as exc:
+        failures.append(f"a typed map function with no map gauge was rejected: {exc}")
+    try:
+        foldc.compile_text(
+            "phase console\nstruct node\n  kids: map i64 node\nend\nfn main\nend\n"
+        )
+    except foldc.FoldError as exc:
+        failures.append(f"a struct map of itself was rejected: {exc}")
+    expect_error(
+        "empty list",
+        "phase console\ngauge list\nfn main\n  let xs = list()\nend\n",
+        "list() needs a type",
+        failures,
+    )
+    expect_error(
+        "empty map",
+        "phase console\ngauge map\nfn main\n  let xs = map()\nend\n",
+        "map() needs a type",
+        failures,
+    )
+    expect_error(
+        "odd map",
+        "phase console\ngauge map\ngauge i64\nfn main\n  let xs = map(1, 2, 3)\nend\n",
+        "map needs pairs",
+        failures,
+    )
+    expect_error(
+        "mixed map",
+        "phase console\ngauge map\ngauge i64\nfn main\n  let xs = map(1, \"a\", \"b\", \"c\")\nend\n",
+        "map pairs have different types",
+        failures,
+    )
+    expect_error(
+        "map key",
+        "phase console\ngauge map\ngauge list\ngauge i64\nfn main\n  let xs = map(list(1), 2)\nend\n",
+        "map key needs i64, f64, or bytes",
+        failures,
+    )
+    expect_error(
+        "unnamed map",
+        "phase console\ngauge i64\nfn main\n  let n = len(map(1, 2))\nend\n",
+        "gauge map is not named",
+        failures,
+    )
+    expect_error(
+        "unused map",
+        "phase console\ngauge map\nfn main\nend\n",
+        "gauge map is unused",
+        failures,
+    )
+    expect_error(
+        "reserved map",
+        "phase console\ngauge i64\nfn map() -> i64\n  return 1\nend\nfn main\nend\n",
+        "map is reserved",
+        failures,
+    )
+    expect_error(
+        "mixed add",
+        "phase console\ngauge i64\ngauge f64\nfn main\n  let n = 1 + 1.0\nend\n",
+        "needs i64 or f64",
+        failures,
+    )
+    expect_error(
+        "struct cycle",
+        "phase console\nstruct box\n  b: box\nend\nfn main\nend\n",
+        "struct cycle",
+        failures,
+    )
+    expect_error(
+        "use escape",
+        "phase console\nuse \"../x.sensepin\"\nfn main\nend\n",
+        "beside the source",
+        failures,
+        BUILD / "escape.sensepin",
+    )
+    expect_error(
+        "missing use",
+        "phase console\nuse \"nope.sensepin\"\nfn main\nend\n",
+        "missing use",
+        failures,
+        BUILD / "missing.sensepin",
+    )
+    (BUILD / "cycle_a.sensepin").write_text(
+        "phase console\nuse \"cycle_b.sensepin\"\nfn main\nend\n",
+        encoding="utf-8",
+    )
+    (BUILD / "cycle_b.sensepin").write_text(
+        "phase console\nuse \"cycle_a.sensepin\"\nfn hop(n: i64) -> i64\n  return n\nend\n",
+        encoding="utf-8",
+    )
+    expect_error(
+        "use cycle",
+        (BUILD / "cycle_a.sensepin").read_text(encoding="utf-8"),
+        "use cycle",
+        failures,
+        BUILD / "cycle_a.sensepin",
+    )
+
+    surface = ROOT / "examples" / "surface.sensepin"
+    surface_c = BUILD / "surface.c"
+    surface_exe = BUILD / "surface.exe"
+    try:
+        surface_c.write_text(foldc.compile_text(surface.read_text(encoding="utf-8"), surface), encoding="utf-8")
+    except foldc.FoldError as exc:
+        failures.append(f"surface failed to compile: {exc}")
+    else:
+        built = clang_program(surface_c, surface_exe)
+        if built.returncode != 0:
+            sys.stderr.buffer.write(built.stderr)
+            failures.append("surface failed to clang")
+        else:
+            check("surface", run([str(surface_exe)]), 0, b"42 0.5 1 3 4 7 0 5 8\n", b"", failures)
+
+    _, edges_exe = compile_fold(
+        "edges",
+        """phase console
+gauge i64
+gauge f64
+gauge list
+struct point
+  x: i64
+  y: i64
+end
+struct box
+  p: point
+end
+fn parse(text: bytes) -> i64
+  return i64(text) else fail "bad"
+end
+fn inner() -> i64
+  fail "nope"
+end
+fn outer() -> i64
+  return inner() else 4
+end
+fn main
+  let half = 1.0 / 2.0
+  let back = i64(0.0 - 1.9)
+  let xs: list i64 = list()
+  set xs = push(xs, 3)
+  set xs = push(xs, 4)
+  let p = point(at(xs, 0) else 0, at(xs, 1) else 0)
+  let b = box(p)
+  let mul_min = -9223372036854775808 * -1 else 9
+  let mul_big = 9223372036854775807 * 2 else 8
+  let mul_neg = (0 - 3) * (0 - 4)
+  let min_one = -9223372036854775808 * 1
+  let zero_min = 0 * -9223372036854775808
+  let fdiv = 1.0 / 0.0 else 7.0
+  let span = 3.0 * 2.0 - 1.0
+  let words: list bytes = list("aa", "b")
+  let grid: list list i64 = list()
+  let row0: list i64 = list(1, 2)
+  set grid = push(grid, row0)
+  let cell = at(at(grid, 0) else list(0), 1) else 0
+  let fs: list f64 = list(1.5, 2.5)
+  let missed = at(xs, 9) else 6
+  while 0
+    write "NO"
+  end
+  write half
+  write " "
+  write back
+  write " "
+  write b.p.y
+  write " "
+  write outer()
+  write " "
+  write mul_min
+  write " "
+  write mul_big
+  write " "
+  write mul_neg
+  write " "
+  write min_one
+  write " "
+  write zero_min
+  write " "
+  write fdiv
+  write " "
+  write span
+  write " "
+  write 1.5 > 1.0
+  write " "
+  write at(words, 0) else "?"
+  write " "
+  write len(words)
+  write " "
+  write cell
+  write " "
+  write at(fs, 1) else 0.0
+  write " "
+  write missed
+  write "\\n"
+end
+""",
+    )
+    check(
+        "edges",
+        run([str(edges_exe)]),
+        0,
+        b"0.5 -1 4 4 9 8 12 -9223372036854775808 0 7.0 5.0 1 aa 2 2 2.5 6\n",
+        b"",
+        failures,
+    )
+
+    _, boom_exe = compile_fold(
+        "boom",
+        """phase console
+gauge i64
+fn boom() -> i64
+  fail "boom"
+end
+fn main
+  let n = boom()
+  write n
+end
+""",
+    )
+    check("boom", run([str(boom_exe)]), 1, b"", b"boom\n", failures)
+
+    _, maps_exe = compile_fold(
+        "maps",
+        """phase console
+gauge i64
+gauge f64
+gauge list
+gauge map
+struct point
+  x: i64
+  y: i64
+end
+struct node
+  kids: map i64 node
+end
+fn id(n: map i64 bytes) -> map i64 bytes
+  return n
+end
+fn main
+  let fresh = map(1, "a", 2, "b", 1, "c")
+  let kept = map(1, 10)
+  let replaced = put(kept, 1, 20)
+  let grown = put(replaced, 2, 30)
+  let zeros = map(0.0, 1, -0.0, 2)
+  let words = map("b", 1, "a", 2, "b", 3)
+  let empty: map bytes i64 = map()
+  let nested: map i64 map bytes i64 = map()
+  set nested = put(nested, 1, map("x", 4))
+  let spots = map(7, point(2, 3))
+  let row: list i64 = list(8, 9)
+  let rows = map("r", row)
+  let grid: list map i64 i64 = list()
+  set grid = push(grid, map(4, 5))
+  let missed = get(fresh, 9) else "z"
+  let blank = get(empty, "no") else 5
+  let named = id(fresh)
+  write len(fresh)
+  write " "
+  write get(fresh, 1) else "?"
+  write " "
+  write get(fresh, 2) else "?"
+  write " "
+  write get(kept, 1) else 0
+  write " "
+  write get(replaced, 1) else 0
+  write " "
+  write has(kept, 2)
+  write " "
+  write get(grown, 2) else 0
+  write " "
+  write len(zeros)
+  write " "
+  write get(zeros, -0.0) else 0
+  write " "
+  write len(words)
+  write " "
+  for k in words
+    write k
+  end
+  write " "
+  write get(words, "a") else 0
+  write " "
+  write len(empty)
+  write " "
+  write has(empty, "a")
+  write " "
+  write blank
+  write " "
+  write get(get(nested, 1) else map("z", 0), "x") else 0
+  write " "
+  write (get(spots, 7) else point(0, 0)).y
+  write " "
+  write at(get(rows, "r") else list(0), 1) else 0
+  write " "
+  write missed
+  write " "
+  for k in fresh
+    write k
+    write " "
+  end
+  write get(named, 1) else "?"
+  write " "
+  write has(fresh, 2)
+  write " "
+  write get(at(grid, 0) else map(0, 0), 4) else 0
+  write "\\n"
+end
+""",
+    )
+    check(
+        "maps",
+        run([str(maps_exe)]),
+        0,
+        b"2 c b 10 20 0 30 1 2 2 ba 2 0 0 5 4 3 9 z 1 2 c 1 5\n",
+        b"",
+        failures,
+    )
+
+    _, miss_exe = compile_fold(
+        "miss",
+        """phase console
+gauge map
+gauge i64
+fn main
+  let m = map(1, 2)
+  let n = get(m, 3)
+  write n
+end
+""",
+    )
+    check("miss", run([str(miss_exe)]), 1, b"", b"\n", failures)
 
     if failures:
         print("\n".join(failures))

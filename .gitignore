@@ -1,8 +1,10 @@
 results/probe-00-work/
 results/probe-01-work/
+results/probe-02-work/
 fold/build/
 **/tally.exe
 **/grades.exe
+**/shelf.exe
 **/zig-out/
 **/zig-cache/
 **/.zig-cache/

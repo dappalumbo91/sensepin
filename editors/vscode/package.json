@@ -1,0 +1,30 @@
+{
+  "name": "sensepin",
+  "displayName": "Sensepin",
+  "description": "Syntax and compiler diagnostics for Sensepin.",
+  "version": "0.1.0",
+  "publisher": "dappalumbo91",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": ["Programming Languages"],
+  "main": "./extension.js",
+  "activationEvents": ["onLanguage:sensepin"],
+  "contributes": {
+    "languages": [
+      {
+        "id": "sensepin",
+        "aliases": ["Sensepin"],
+        "extensions": [".sensepin"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "sensepin",
+        "scopeName": "source.sensepin",
+        "path": "./syntaxes/sensepin.tmLanguage.json"
+      }
+    ]
+  }
+}

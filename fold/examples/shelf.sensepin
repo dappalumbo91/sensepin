@@ -1,0 +1,85 @@
+phase console
+gauge args
+gauge file
+gauge lines
+gauge i64
+gauge bytes
+
+fn name_ok(name: bytes) -> i64
+  let ok = 1
+  if len(name) == 0
+    set ok = 0
+  end
+  for b in bytes(name)
+    let good = 0
+    if b >= 48
+      if b <= 57
+        set good = 1
+      end
+    end
+    if b >= 65
+      if b <= 90
+        set good = 1
+      end
+    end
+    if b >= 97
+      if b <= 122
+        set good = 1
+      end
+    end
+    if b == 95
+      set good = 1
+    end
+    if good == 0
+      set ok = 0
+    end
+  end
+  return ok
+end
+
+fn main
+  if argc() != 2
+    fail "usage: shelf <file>"
+  end
+  let path = arg(1)
+  let text = open(path, 1048576, "cannot open ", "empty file", "file too large") else fail reason
+  let count = 0
+  let pieces = 0
+  let total = 0
+  let high = 0
+  let seen = 0
+  let item = ""
+  for line in lines(text)
+    let bad = "bad line " ++ line.n ++ ": " ++ line.text
+    if holds(line.text, " ") != 2
+      fail bad
+    end
+    let name = before(line.text, " ") else fail bad
+    let rest = after(line.text, " ") else fail bad
+    if holds(rest, " ") != 1
+      fail bad
+    end
+    let qty_text = before(rest, " ") else fail bad
+    let price_text = after(rest, " ") else fail bad
+    if name_ok(name) == 0
+      fail bad
+    end
+    let qty = i64(qty_text) else fail bad
+    let price = i64(price_text) else fail bad
+    let line_value = qty * price else fail bad
+    set pieces = pieces + qty else fail bad
+    set total = total + line_value else fail bad
+    if seen == 0
+      set high = line_value
+      set item = name
+      set seen = 1
+    else
+      if line_value > high
+        set high = line_value
+        set item = name
+      end
+    end
+    set count = count + 1
+  end
+  write "count " ++ count ++ "\npieces " ++ pieces ++ "\nvalue " ++ total ++ "\nitem " ++ item ++ "\n"
+end

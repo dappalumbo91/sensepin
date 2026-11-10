@@ -1,0 +1,2713 @@
+phase console
+gauge args
+gauge file
+gauge lines
+gauge i64
+gauge bytes
+gauge list
+gauge map
+
+struct fixup
+  slot: i64
+  word: bytes
+end
+
+struct buf
+  parts: list bytes
+  part: bytes
+  fills: i64
+  count: i64
+end
+
+struct unit
+  buf: buf
+  marks: map bytes i64
+  jumps: list fixup
+  rips: list fixup
+end
+
+struct tok
+  kind: i64
+  num: i64
+  text: bytes
+end
+
+struct step
+  tok: tok
+  pos: i64
+end
+
+struct placed
+  data: buf
+  symbols: map bytes i64
+  here: i64
+end
+
+struct block
+  kind: i64
+  alt: bytes
+  done: bytes
+end
+
+struct prog
+  code: bytes
+  pool: bytes
+  nconst: i64
+  strs: bytes
+  funcs: bytes
+  jumps: list fixup
+  marks: map bytes i64
+  imap: map i64 i64
+  bmap: map bytes i64
+  smap: map bytes i64
+  fnames: map bytes i64
+  arity: map bytes i64
+  slots: map bytes i64
+  unwind: bytes
+  main_off: i64
+  main_slots: i64
+  saw_main: i64
+  live: i64
+  start: i64
+  nparams: i64
+  is_main: i64
+  seen: i64
+  cbuf: buf
+  blocks: list block
+  failto: bytes
+  pbuf: buf
+end
+
+struct parsed
+  prog: prog
+  pos: i64
+  kind: i64
+end
+
+fn low8(n: i64) -> i64
+  if n == -9223372036854775808
+    return 0
+  end
+  let q = n / 256 else fail "math"
+  let r = n - q * 256 else fail "math"
+  if r < 0
+    return r + 256 else fail "math"
+  end
+  return r
+end
+
+fn asr8(n: i64) -> i64
+  if n == -9223372036854775808
+    return -36028797018963968
+  end
+  let q = n / 256 else fail "math"
+  let r = n - q * 256 else fail "math"
+  if r < 0
+    return q - 1 else fail "math"
+  end
+  return q
+end
+
+fn qn(n: i64, width: i64) -> bytes
+  let out = ""
+  let v = n
+  let i = 0
+  while i < width
+    set out = out ++ byte(low8(v))
+    set v = asr8(v)
+    set i = i + 1 else fail "math"
+  end
+  return out
+end
+
+fn q4(n: i64) -> bytes
+  return qn(n, 4)
+end
+
+fn q8(n: i64) -> bytes
+  return qn(n, 8)
+end
+
+fn q8e(n: i64) -> bytes
+  let b0 = u16(n)
+  let n1 = asr8(asr8(n))
+  let b1 = u16(n1)
+  let n2 = asr8(asr8(n1))
+  let b2 = u16(n2)
+  let n3 = asr8(asr8(n2))
+  let b3 = u16(n3)
+  let lo = b0 ++ b1
+  let hi = b2 ++ b3
+  return lo ++ hi
+end
+
+fn pool_rec(tag: i64, a: i64, b: i64, c: i64) -> bytes
+  let left = q8e(tag) ++ q8e(a)
+  let right = q8e(b) ++ q8e(c)
+  return left ++ right
+end
+
+fn u16(n: i64) -> bytes
+  return byte(low8(n)) ++ byte(low8(asr8(n)))
+end
+
+fn reg_low(reg: i64) -> i64
+  if reg >= 8
+    return reg - 8 else fail "math"
+  end
+  return reg
+end
+
+fn rex_byte(w: i64, reg: i64, rm: i64, index: i64) -> i64
+  let r = 0
+  if reg >= 8
+    set r = 1
+  end
+  let b = 0
+  if rm >= 8
+    set b = 1
+  end
+  let x = 0
+  if index >= 8
+    set x = 1
+  end
+  let any = w + r + b + x else fail "math"
+  if any == 0
+    return -1
+  end
+  return 64 + w * 8 + r * 4 + x * 2 + b else fail "math"
+end
+
+fn rex_prefix(w: i64, reg: i64, rm: i64) -> bytes
+  let rx = rex_byte(w, reg, rm, 0)
+  if rx >= 0
+    return byte(rx)
+  end
+  return ""
+end
+
+fn modrm(modv: i64, reg: i64, rm: i64) -> i64
+  let r = reg_low(reg)
+  let b = reg_low(rm)
+  return modv * 64 + r * 8 + b else fail "math"
+end
+
+fn mem_mod(disp: i64, base: i64, tight: i64) -> i64
+  if tight == 1
+    if disp == 0
+      if base != 5
+        if base != 13
+          return 0
+        end
+      end
+    end
+  end
+  if disp >= -128
+    if disp <= 127
+      return 1
+    end
+  end
+  return 2
+end
+
+fn emit_mem(w: i64, op0: i64, op1: i64, reg: i64, base: i64, disp: i64, tight: i64, tail: i64, tail_n: i64) -> bytes
+  let modv = mem_mod(disp, base, tight)
+  let out = rex_prefix(w, reg, base) ++ byte(op0)
+  if op1 >= 0
+    set out = out ++ byte(op1)
+  end
+  set out = out ++ byte(modrm(modv, reg, base))
+  if base == 4
+    set out = out ++ byte(36)
+  end
+  if base == 12
+    set out = out ++ byte(36)
+  end
+  if modv == 1
+    set out = out ++ byte(low8(disp))
+  end
+  if modv == 2
+    set out = out ++ q4(disp)
+  end
+  if tail_n == 1
+    set out = out ++ byte(low8(tail))
+  end
+  if tail_n == 4
+    set out = out ++ q4(tail)
+  end
+  return out
+end
+
+fn emit(a: unit, extra: bytes) -> unit
+  return unit(badd(a.buf, extra), a.marks, a.jumps, a.rips)
+end
+
+fn emit1(a: unit, n: i64) -> unit
+  return emit(a, byte(n))
+end
+
+fn emit_jump(a: unit, extra: bytes, name: bytes) -> unit
+  let slot = a.buf.count + len(extra) else fail "math"
+  let jumps = push(a.jumps, fixup(slot, name))
+  let marked = unit(a.buf, a.marks, jumps, a.rips)
+  return emit(marked, extra ++ byte(0) ++ byte(0) ++ byte(0) ++ byte(0))
+end
+
+fn emit_rip(a: unit, extra: bytes, name: bytes) -> unit
+  let slot = a.buf.count + len(extra) else fail "math"
+  let rips = push(a.rips, fixup(slot, name))
+  let marked = unit(a.buf, a.marks, a.jumps, rips)
+  return emit(marked, extra ++ byte(0) ++ byte(0) ++ byte(0) ++ byte(0))
+end
+
+fn label(a: unit, name: bytes) -> unit
+  return unit(a.buf, put(a.marks, name, a.buf.count), a.jumps, a.rips)
+end
+
+fn raw_byte(a: unit, n: i64) -> unit
+  return emit1(a, n)
+end
+
+fn ret(a: unit) -> unit
+  return emit1(a, 195)
+end
+
+fn int3(a: unit) -> unit
+  return emit1(a, 204)
+end
+
+fn and_rsp_align(a: unit) -> unit
+  return emit(a, byte(72) ++ byte(131) ++ byte(228) ++ byte(240))
+end
+
+fn sub_rsp_imm32(a: unit, n: i64) -> unit
+  return emit(a, byte(72) ++ byte(129) ++ byte(236) ++ q4(n))
+end
+
+fn add_rsp_imm32(a: unit, n: i64) -> unit
+  return emit(a, byte(72) ++ byte(129) ++ byte(196) ++ q4(n))
+end
+
+fn mov_reg_imm32(a: unit, dest: i64, n: i64) -> unit
+  let extra = ""
+  if dest >= 8
+    set extra = byte(65)
+  end
+  return emit(a, extra ++ byte(184 + reg_low(dest) else fail "math") ++ q4(n))
+end
+
+fn mov_reg_imm64(a: unit, dest: i64, n: i64) -> unit
+  let rex = 72
+  if dest >= 8
+    set rex = 73
+  end
+  return emit(a, byte(rex) ++ byte(184 + reg_low(dest) else fail "math") ++ q8(n))
+end
+
+fn mov_reg_reg(a: unit, dest: i64, src: i64) -> unit
+  return emit(a, rex_prefix(1, src, dest) ++ byte(137) ++ byte(modrm(3, src, dest)))
+end
+
+fn alu(a: unit, opcode: i64, dest: i64, src: i64) -> unit
+  return emit(a, rex_prefix(1, dest, src) ++ byte(opcode) ++ byte(modrm(3, dest, src)))
+end
+
+fn add_reg(a: unit, dest: i64, src: i64) -> unit
+  return alu(a, 3, dest, src)
+end
+
+fn sub_reg(a: unit, dest: i64, src: i64) -> unit
+  return alu(a, 43, dest, src)
+end
+
+fn cmp_reg(a: unit, dest: i64, src: i64) -> unit
+  return alu(a, 59, dest, src)
+end
+
+fn or_reg(a: unit, dest: i64, src: i64) -> unit
+  return alu(a, 11, dest, src)
+end
+
+fn xor_reg(a: unit, dest: i64, src: i64) -> unit
+  return alu(a, 51, dest, src)
+end
+
+fn test_reg(a: unit, dest: i64, src: i64) -> unit
+  return alu(a, 133, dest, src)
+end
+
+fn reg_imm(a: unit, opcode: i64, ext: i64, dest: i64, n: i64, width: i64) -> unit
+  let tail = q4(n)
+  if width == 1
+    set tail = byte(low8(n))
+  end
+  return emit(a, rex_prefix(1, 0, dest) ++ byte(opcode) ++ byte(modrm(3, ext, dest)) ++ tail)
+end
+
+fn add_reg_imm8(a: unit, dest: i64, n: i64) -> unit
+  return reg_imm(a, 131, 0, dest, n, 1)
+end
+
+fn add_reg_imm32(a: unit, dest: i64, n: i64) -> unit
+  return reg_imm(a, 129, 0, dest, n, 4)
+end
+
+fn cmp_reg_imm8(a: unit, dest: i64, n: i64) -> unit
+  return reg_imm(a, 131, 7, dest, n, 1)
+end
+
+fn cmp_reg_imm32(a: unit, dest: i64, n: i64) -> unit
+  return reg_imm(a, 129, 7, dest, n, 4)
+end
+
+fn and_reg_imm8(a: unit, dest: i64, n: i64) -> unit
+  return reg_imm(a, 131, 4, dest, n, 1)
+end
+
+fn shl_reg_imm8(a: unit, dest: i64, n: i64) -> unit
+  return reg_imm(a, 193, 4, dest, n, 1)
+end
+
+fn ff(a: unit, opcode: i64, ext: i64, dest: i64) -> unit
+  return emit(a, rex_prefix(1, 0, dest) ++ byte(opcode) ++ byte(modrm(3, ext, dest)))
+end
+
+fn inc_reg(a: unit, dest: i64) -> unit
+  return ff(a, 255, 0, dest)
+end
+
+fn dec_reg(a: unit, dest: i64) -> unit
+  return ff(a, 255, 1, dest)
+end
+
+fn neg_reg(a: unit, dest: i64) -> unit
+  return ff(a, 247, 3, dest)
+end
+
+fn udiv_reg(a: unit, dest: i64) -> unit
+  return ff(a, 247, 6, dest)
+end
+
+fn xpush(a: unit, dest: i64) -> unit
+  let extra = ""
+  let rx = rex_byte(0, 0, dest, 0)
+  if rx >= 0
+    set extra = byte(rx)
+  end
+  return emit(a, extra ++ byte(80 + reg_low(dest) else fail "math"))
+end
+
+fn xpop(a: unit, dest: i64) -> unit
+  let extra = ""
+  let rx = rex_byte(0, 0, dest, 0)
+  if rx >= 0
+    set extra = byte(rx)
+  end
+  return emit(a, extra ++ byte(88 + reg_low(dest) else fail "math"))
+end
+
+fn mov_reg_mem(a: unit, dest: i64, base: i64, disp: i64) -> unit
+  return emit(a, emit_mem(1, 139, -1, dest, base, disp, 0, 0, 0))
+end
+
+fn mov_mem_reg(a: unit, base: i64, disp: i64, src: i64) -> unit
+  return emit(a, emit_mem(1, 137, -1, src, base, disp, 0, 0, 0))
+end
+
+fn mov_mem_imm32(a: unit, base: i64, disp: i64, n: i64) -> unit
+  return emit(a, emit_mem(1, 199, -1, 0, base, disp, 0, n, 4))
+end
+
+fn inc_mem(a: unit, base: i64, disp: i64) -> unit
+  return emit(a, emit_mem(1, 255, -1, 0, base, disp, 0, 0, 0))
+end
+
+fn dec_mem(a: unit, base: i64, disp: i64) -> unit
+  return emit(a, emit_mem(1, 255, -1, 1, base, disp, 0, 0, 0))
+end
+
+fn add_mem_reg(a: unit, base: i64, disp: i64, src: i64) -> unit
+  return emit(a, emit_mem(1, 1, -1, src, base, disp, 0, 0, 0))
+end
+
+fn add_mem_imm8(a: unit, base: i64, disp: i64, n: i64) -> unit
+  return emit(a, emit_mem(1, 131, -1, 0, base, disp, 0, n, 1))
+end
+
+fn movzx_reg_byte_mem(a: unit, dest: i64, base: i64, disp: i64) -> unit
+  return emit(a, emit_mem(0, 15, 182, dest, base, disp, 1, 0, 0))
+end
+
+fn movsxd_reg_mem(a: unit, dest: i64, base: i64, disp: i64) -> unit
+  return emit(a, emit_mem(1, 99, -1, dest, base, disp, 1, 0, 0))
+end
+
+fn mov_mem8_reg(a: unit, base: i64, disp: i64, src: i64) -> unit
+  return emit(a, emit_mem(0, 136, -1, src, base, disp, 1, 0, 0))
+end
+
+fn mov_rsp_imm32(a: unit, disp: i64, n: i64) -> unit
+  return emit(a, emit_mem(1, 199, -1, 0, 4, disp, 0, n, 4))
+end
+
+fn lea_rip(a: unit, dest: i64, name: bytes) -> unit
+  return emit_rip(a, rex_prefix(1, dest, 0) ++ byte(141) ++ byte(modrm(0, dest, 5)), name)
+end
+
+fn call_rip(a: unit, name: bytes) -> unit
+  return emit_rip(a, byte(255) ++ byte(21), name)
+end
+
+fn call_label(a: unit, name: bytes) -> unit
+  return emit_jump(a, byte(232), name)
+end
+
+fn jmp_label(a: unit, name: bytes) -> unit
+  return emit_jump(a, byte(233), name)
+end
+
+fn jcc(a: unit, cc: i64, name: bytes) -> unit
+  return emit_jump(a, byte(15) ++ byte(128 + cc else fail "math"), name)
+end
+
+fn jz(a: unit, name: bytes) -> unit
+  return jcc(a, 4, name)
+end
+
+fn setcc(a: unit, cc: i64, reg: i64) -> unit
+  return emit(a, rex_prefix(0, 0, reg) ++ byte(15) ++ byte(cc) ++ byte(modrm(3, 0, reg)))
+end
+
+fn je(a: unit, name: bytes) -> unit
+  return jcc(a, 4, name)
+end
+
+fn jnz(a: unit, name: bytes) -> unit
+  return jcc(a, 5, name)
+end
+
+fn jb(a: unit, name: bytes) -> unit
+  return jcc(a, 2, name)
+end
+
+fn ja(a: unit, name: bytes) -> unit
+  return jcc(a, 7, name)
+end
+
+fn jae(a: unit, name: bytes) -> unit
+  return jcc(a, 3, name)
+end
+
+fn jo(a: unit, name: bytes) -> unit
+  return jcc(a, 0, name)
+end
+
+fn align_size(src: unit, dest: i64) -> unit
+  let a = src
+  set a = xor_reg(a, 1, 1)
+  set a = test_reg(a, dest, dest)
+  set a = setcc(a, 148, 1)
+  set a = add_reg(a, dest, 1)
+  set a = add_reg_imm8(a, dest, 7)
+  set a = and_reg_imm8(a, dest, 248)
+  return a
+end
+
+fn vessel() -> unit
+  let marks: map bytes i64 = map()
+  let jumps: list fixup = list()
+  let rips: list fixup = list()
+  let a = unit(bnew(), marks, jumps, rips)
+
+set a = label(a, "start")
+set a = and_rsp_align(a)
+set a = sub_rsp_imm32(a, 256)
+set a = lea_rip(a, 5, "mem")
+set a = mov_reg_reg(a, 0, 4)
+set a = mov_mem_reg(a, 5, 176, 0)
+set a = mov_reg_imm32(a, 1, 4294967285)
+set a = call_rip(a, "iat_kernel32_GetStdHandle")
+set a = mov_mem_reg(a, 5, 0, 0)
+set a = mov_reg_imm32(a, 1, 4294967284)
+set a = call_rip(a, "iat_kernel32_GetStdHandle")
+set a = mov_mem_reg(a, 5, 8, 0)
+set a = mov_reg_reg(a, 0, 5)
+set a = mov_reg_mem(a, 1, 5, 216)
+set a = add_reg(a, 0, 1)
+set a = mov_mem_reg(a, 5, 96, 0)
+set a = mov_reg_reg(a, 3, 5)
+set a = mov_reg_mem(a, 1, 5, 224)
+set a = add_reg(a, 3, 1)
+set a = mov_mem_reg(a, 5, 128, 3)
+set a = mov_reg_reg(a, 0, 5)
+set a = mov_reg_mem(a, 1, 5, 232)
+set a = add_reg(a, 0, 1)
+set a = mov_mem_reg(a, 5, 120, 0)
+set a = lea_rip(a, 12, "strs")
+set a = mov_reg_mem(a, 1, 5, 208)
+set a = label(a, "fix_pool")
+set a = test_reg(a, 1, 1)
+set a = jz(a, "fix_done")
+set a = mov_reg_mem(a, 0, 3, 0)
+set a = mov_reg_imm32(a, 2, 256)
+set a = test_reg(a, 0, 2)
+set a = jz(a, "fix_next")
+set a = mov_reg_mem(a, 0, 3, 8)
+set a = add_reg(a, 0, 12)
+set a = mov_mem_reg(a, 3, 8, 0)
+set a = mov_reg_mem(a, 0, 3, 0)
+set a = mov_reg_imm32(a, 2, 256)
+set a = sub_reg(a, 0, 2)
+set a = mov_mem_reg(a, 3, 0, 0)
+set a = label(a, "fix_next")
+set a = add_reg_imm8(a, 3, 32)
+set a = dec_reg(a, 1)
+set a = jmp_label(a, "fix_pool")
+set a = label(a, "fix_done")
+set a = xor_reg(a, 1, 1)
+set a = mov_reg_imm32(a, 2, 65536)
+set a = mov_reg_imm32(a, 8, 12288)
+set a = mov_reg_imm32(a, 9, 4)
+set a = call_rip(a, "iat_kernel32_VirtualAlloc")
+set a = test_reg(a, 0, 0)
+set a = jz(a, "oom")
+set a = mov_mem_reg(a, 5, 72, 0)
+set a = mov_reg_imm32(a, 1, 65536)
+set a = add_reg(a, 0, 1)
+set a = mov_mem_reg(a, 5, 80, 0)
+set a = xor_reg(a, 1, 1)
+set a = mov_reg_imm32(a, 2, 8192)
+set a = mov_reg_imm32(a, 8, 12288)
+set a = mov_reg_imm32(a, 9, 4)
+set a = call_rip(a, "iat_kernel32_VirtualAlloc")
+set a = test_reg(a, 0, 0)
+set a = jz(a, "oom")
+set a = mov_mem_reg(a, 5, 88, 0)
+set a = xor_reg(a, 1, 1)
+set a = mov_reg_imm32(a, 2, 6144)
+set a = mov_reg_imm32(a, 8, 12288)
+set a = mov_reg_imm32(a, 9, 4)
+set a = call_rip(a, "iat_kernel32_VirtualAlloc")
+set a = test_reg(a, 0, 0)
+set a = jz(a, "oom")
+set a = mov_mem_reg(a, 5, 112, 0)
+set a = jmp_label(a, "dispatch")
+set a = label(a, "write_out")
+set a = test_reg(a, 8, 8)
+set a = jz(a, "write_ret")
+set a = sub_rsp_imm32(a, 40)
+set a = mov_reg_reg(a, 9, 5)
+set a = add_reg_imm32(a, 9, 168)
+set a = mov_rsp_imm32(a, 32, 0)
+set a = call_rip(a, "iat_kernel32_WriteFile")
+set a = add_rsp_imm32(a, 40)
+set a = label(a, "write_ret")
+set a = ret(a)
+set a = label(a, "oom")
+set a = mov_reg_mem(a, 0, 5, 176)
+set a = mov_reg_reg(a, 4, 0)
+set a = mov_reg_mem(a, 1, 5, 8)
+set a = lea_rip(a, 2, "oommsg")
+set a = mov_reg_imm32(a, 8, 14)
+set a = call_label(a, "write_out")
+set a = mov_reg_mem(a, 0, 5, 176)
+set a = mov_reg_reg(a, 4, 0)
+set a = mov_reg_imm32(a, 1, 1)
+set a = call_rip(a, "iat_kernel32_ExitProcess")
+set a = int3(a)
+set a = label(a, "stop1")
+set a = mov_reg_mem(a, 0, 5, 176)
+set a = mov_reg_reg(a, 4, 0)
+set a = mov_reg_imm32(a, 1, 1)
+set a = call_rip(a, "iat_kernel32_ExitProcess")
+set a = int3(a)
+set a = label(a, "depth_fail")
+set a = mov_reg_mem(a, 0, 5, 176)
+set a = mov_reg_reg(a, 4, 0)
+set a = mov_reg_mem(a, 1, 5, 8)
+set a = lea_rip(a, 2, "depthmsg")
+set a = mov_reg_imm32(a, 8, 11)
+set a = call_label(a, "write_out")
+set a = mov_reg_mem(a, 0, 5, 176)
+set a = mov_reg_reg(a, 4, 0)
+set a = mov_reg_imm32(a, 1, 1)
+set a = call_rip(a, "iat_kernel32_ExitProcess")
+set a = int3(a)
+set a = label(a, "alloc")
+set a = test_reg(a, 1, 1)
+set a = jnz(a, "alloc_n")
+set a = mov_reg_imm32(a, 1, 1)
+set a = label(a, "alloc_n")
+set a = add_reg_imm8(a, 1, 7)
+set a = and_reg_imm8(a, 1, 248)
+set a = mov_reg_mem(a, 0, 5, 72)
+set a = mov_reg_reg(a, 2, 0)
+set a = add_reg(a, 2, 1)
+set a = jb(a, "oom")
+set a = mov_reg_mem(a, 1, 5, 80)
+set a = cmp_reg(a, 2, 1)
+set a = ja(a, "oom")
+set a = mov_mem_reg(a, 5, 72, 2)
+set a = ret(a)
+set a = label(a, "memcpy")
+set a = test_reg(a, 8, 8)
+set a = jz(a, "memcpy_ret")
+set a = xpush(a, 6)
+set a = xpush(a, 7)
+set a = mov_reg_reg(a, 7, 1)
+set a = mov_reg_reg(a, 6, 2)
+set a = mov_reg_reg(a, 1, 8)
+set a = raw_byte(a, 243)
+set a = raw_byte(a, 164)
+set a = xpop(a, 7)
+set a = xpop(a, 6)
+set a = label(a, "memcpy_ret")
+set a = ret(a)
+set a = label(a, "pop_cell")
+set a = mov_reg_mem(a, 0, 5, 24)
+set a = test_reg(a, 0, 0)
+set a = jz(a, "stop1")
+set a = dec_mem(a, 5, 24)
+set a = mov_reg_mem(a, 0, 5, 24)
+set a = shl_reg_imm8(a, 0, 5)
+set a = mov_reg_mem(a, 2, 5, 88)
+set a = add_reg(a, 0, 2)
+set a = mov_reg_reg(a, 3, 0)
+set a = ret(a)
+set a = label(a, "push_i64")
+set a = mov_reg_mem(a, 1, 5, 24)
+set a = shl_reg_imm8(a, 1, 5)
+set a = mov_reg_mem(a, 2, 5, 88)
+set a = add_reg(a, 1, 2)
+set a = mov_mem_imm32(a, 1, 0, 0)
+set a = mov_mem_reg(a, 1, 8, 0)
+set a = mov_mem_imm32(a, 1, 16, 0)
+set a = mov_mem_imm32(a, 1, 24, 0)
+set a = inc_mem(a, 5, 24)
+set a = ret(a)
+set a = label(a, "push_bytes")
+set a = mov_reg_reg(a, 8, 2)
+set a = mov_reg_reg(a, 9, 0)
+set a = mov_reg_mem(a, 1, 5, 24)
+set a = shl_reg_imm8(a, 1, 5)
+set a = mov_reg_mem(a, 2, 5, 88)
+set a = add_reg(a, 1, 2)
+set a = mov_mem_imm32(a, 1, 0, 1)
+set a = mov_mem_reg(a, 1, 8, 9)
+set a = mov_mem_imm32(a, 1, 16, 0)
+set a = mov_mem_reg(a, 1, 16, 8)
+set a = mov_mem_imm32(a, 1, 24, 0)
+set a = inc_mem(a, 5, 24)
+set a = ret(a)
+set a = label(a, "push_cell")
+set a = mov_reg_mem(a, 1, 5, 24)
+set a = shl_reg_imm8(a, 1, 5)
+set a = mov_reg_mem(a, 2, 5, 88)
+set a = add_reg(a, 1, 2)
+set a = mov_reg_mem(a, 0, 3, 0)
+set a = mov_mem_reg(a, 1, 0, 0)
+set a = mov_reg_mem(a, 0, 3, 8)
+set a = mov_mem_reg(a, 1, 8, 0)
+set a = mov_reg_mem(a, 0, 3, 16)
+set a = mov_mem_reg(a, 1, 16, 0)
+set a = mov_reg_mem(a, 0, 3, 24)
+set a = mov_mem_reg(a, 1, 24, 0)
+set a = inc_mem(a, 5, 24)
+set a = ret(a)
+set a = label(a, "read_u16")
+set a = mov_reg_mem(a, 1, 5, 16)
+set a = mov_reg_mem(a, 2, 5, 96)
+set a = add_reg(a, 2, 1)
+set a = movzx_reg_byte_mem(a, 0, 2, 0)
+set a = movzx_reg_byte_mem(a, 1, 2, 1)
+set a = shl_reg_imm8(a, 1, 8)
+set a = or_reg(a, 0, 1)
+set a = add_mem_imm8(a, 5, 16, 2)
+set a = ret(a)
+set a = label(a, "read_i32")
+set a = mov_reg_mem(a, 1, 5, 16)
+set a = mov_reg_mem(a, 2, 5, 96)
+set a = add_reg(a, 2, 1)
+set a = movsxd_reg_mem(a, 0, 2, 0)
+set a = add_mem_imm8(a, 5, 16, 4)
+set a = ret(a)
+set a = label(a, "read_u8")
+set a = mov_reg_mem(a, 1, 5, 16)
+set a = mov_reg_mem(a, 2, 5, 96)
+set a = add_reg(a, 2, 1)
+set a = movzx_reg_byte_mem(a, 0, 2, 0)
+set a = add_mem_imm8(a, 5, 16, 1)
+set a = ret(a)
+set a = label(a, "fail_empty")
+set a = mov_mem_imm32(a, 5, 48, 1)
+set a = mov_mem_imm32(a, 5, 56, 0)
+set a = mov_mem_imm32(a, 5, 64, 0)
+set a = jmp_label(a, "dispatch")
+set a = label(a, "dispatch")
+set a = mov_reg_mem(a, 0, 5, 16)
+set a = mov_reg_mem(a, 1, 5, 104)
+set a = cmp_reg(a, 0, 1)
+set a = jae(a, "stop1")
+set a = mov_reg_mem(a, 2, 5, 96)
+set a = add_reg(a, 2, 0)
+set a = movzx_reg_byte_mem(a, 1, 2, 0)
+set a = add_mem_imm8(a, 5, 16, 1)
+set a = cmp_reg_imm8(a, 1, 0)
+set a = je(a, "op_halt")
+set a = cmp_reg_imm8(a, 1, 1)
+set a = je(a, "op_write")
+set a = cmp_reg_imm8(a, 1, 2)
+set a = je(a, "op_fail")
+set a = cmp_reg_imm8(a, 1, 5)
+set a = je(a, "op_push_const")
+set a = cmp_reg_imm8(a, 1, 7)
+set a = je(a, "op_push_local")
+set a = cmp_reg_imm8(a, 1, 11)
+set a = je(a, "op_if_fail")
+set a = cmp_reg_imm8(a, 1, 13)
+set a = je(a, "op_add")
+set a = cmp_reg_imm8(a, 1, 19)
+set a = je(a, "op_cat")
+set a = cmp_reg_imm8(a, 1, 33)
+set a = je(a, "op_cat_set")
+set a = cmp_reg_imm8(a, 1, 29)
+set a = je(a, "op_reason")
+set a = cmp_reg_imm8(a, 1, 30)
+set a = je(a, "op_call")
+set a = cmp_reg_imm8(a, 1, 31)
+set a = je(a, "op_ret")
+set a = cmp_reg_imm8(a, 1, 32)
+set a = je(a, "op_ret_fail")
+set a = cmp_reg_imm8(a, 1, 34)
+set a = je(a, "op_dec")
+set a = cmp_reg_imm8(a, 1, 6)
+set a = je(a, "op_pop")
+set a = cmp_reg_imm8(a, 1, 8)
+set a = je(a, "op_jump")
+set a = cmp_reg_imm8(a, 1, 9)
+set a = je(a, "op_jz")
+set a = cmp_reg_imm8(a, 1, 12)
+set a = je(a, "op_clear")
+set a = cmp_reg_imm8(a, 1, 18)
+set a = je(a, "op_cmp")
+set a = jmp_label(a, "stop1")
+set a = label(a, "op_halt")
+set a = mov_reg_mem(a, 0, 5, 176)
+set a = mov_reg_reg(a, 4, 0)
+set a = mov_reg_imm32(a, 1, 0)
+set a = call_rip(a, "iat_kernel32_ExitProcess")
+set a = int3(a)
+set a = label(a, "op_write")
+set a = call_label(a, "pop_cell")
+set a = mov_reg_mem(a, 1, 5, 0)
+set a = mov_reg_mem(a, 2, 3, 8)
+set a = mov_reg_mem(a, 8, 3, 16)
+set a = call_label(a, "write_out")
+set a = jmp_label(a, "dispatch")
+set a = label(a, "op_fail")
+set a = call_label(a, "pop_cell")
+set a = mov_reg_mem(a, 1, 5, 8)
+set a = mov_reg_mem(a, 2, 3, 8)
+set a = mov_reg_mem(a, 8, 3, 16)
+set a = call_label(a, "write_out")
+set a = mov_reg_mem(a, 1, 5, 8)
+set a = lea_rip(a, 2, "strs")
+set a = mov_reg_imm32(a, 8, 1)
+set a = call_label(a, "write_out")
+set a = mov_reg_mem(a, 0, 5, 176)
+set a = mov_reg_reg(a, 4, 0)
+set a = mov_reg_imm32(a, 1, 1)
+set a = call_rip(a, "iat_kernel32_ExitProcess")
+set a = int3(a)
+set a = label(a, "op_push_const")
+set a = call_label(a, "read_u16")
+set a = shl_reg_imm8(a, 0, 5)
+set a = mov_reg_mem(a, 2, 5, 128)
+set a = add_reg(a, 0, 2)
+set a = mov_reg_reg(a, 3, 0)
+set a = call_label(a, "push_cell")
+set a = jmp_label(a, "dispatch")
+set a = label(a, "op_push_local")
+set a = call_label(a, "read_u16")
+set a = mov_reg_mem(a, 1, 5, 32)
+set a = add_reg(a, 0, 1)
+set a = shl_reg_imm8(a, 0, 5)
+set a = mov_reg_mem(a, 2, 5, 88)
+set a = add_reg(a, 0, 2)
+set a = mov_reg_reg(a, 3, 0)
+set a = call_label(a, "push_cell")
+set a = jmp_label(a, "dispatch")
+set a = label(a, "op_if_fail")
+set a = call_label(a, "read_i32")
+set a = mov_reg_mem(a, 1, 5, 48)
+set a = test_reg(a, 1, 1)
+set a = jz(a, "dispatch")
+set a = add_mem_reg(a, 5, 16, 0)
+set a = jmp_label(a, "dispatch")
+set a = label(a, "op_add")
+set a = call_label(a, "pop_cell")
+set a = mov_reg_mem(a, 12, 3, 8)
+set a = call_label(a, "pop_cell")
+set a = mov_reg_mem(a, 0, 3, 8)
+set a = add_reg(a, 0, 12)
+set a = jo(a, "fail_empty")
+set a = call_label(a, "push_i64")
+set a = jmp_label(a, "dispatch")
+set a = label(a, "op_reason")
+set a = mov_reg_mem(a, 0, 5, 56)
+set a = mov_reg_mem(a, 2, 5, 64)
+set a = call_label(a, "push_bytes")
+set a = jmp_label(a, "dispatch")
+set a = label(a, "op_cat")
+set a = call_label(a, "pop_cell")
+set a = mov_reg_mem(a, 12, 3, 8)
+set a = mov_reg_mem(a, 13, 3, 16)
+set a = call_label(a, "pop_cell")
+set a = mov_reg_mem(a, 14, 3, 8)
+set a = mov_reg_mem(a, 15, 3, 16)
+set a = mov_mem_imm32(a, 5, 200, 0)
+set a = jmp_label(a, "cat_join")
+set a = label(a, "op_cat_set")
+set a = call_label(a, "read_u16")
+set a = mov_reg_reg(a, 12, 0)
+set a = call_label(a, "pop_cell")
+set a = mov_reg_mem(a, 13, 3, 8)
+set a = mov_reg_mem(a, 14, 3, 16)
+set a = mov_mem_reg(a, 5, 152, 13)
+set a = mov_mem_reg(a, 5, 160, 14)
+set a = mov_reg_reg(a, 0, 12)
+set a = shl_reg_imm8(a, 0, 5)
+set a = mov_reg_mem(a, 1, 5, 88)
+set a = add_reg(a, 0, 1)
+set a = mov_mem_reg(a, 5, 200, 0)
+set a = mov_reg_mem(a, 1, 0, 0)
+set a = cmp_reg_imm8(a, 1, 1)
+set a = jnz(a, "cat_set_empty")
+set a = mov_reg_mem(a, 14, 0, 8)
+set a = mov_reg_mem(a, 15, 0, 16)
+set a = jmp_label(a, "cat_set_go")
+set a = label(a, "cat_set_empty")
+set a = xor_reg(a, 14, 14)
+set a = xor_reg(a, 15, 15)
+set a = label(a, "cat_set_go")
+set a = mov_reg_mem(a, 12, 5, 152)
+set a = mov_reg_mem(a, 13, 5, 160)
+set a = jmp_label(a, "cat_join")
+set a = label(a, "alias")
+set a = xor_reg(a, 10, 10)
+set a = mov_reg_mem(a, 11, 5, 24)
+set a = label(a, "alias_loop")
+set a = cmp_reg(a, 10, 11)
+set a = jae(a, "alias_no")
+set a = mov_reg_reg(a, 0, 10)
+set a = shl_reg_imm8(a, 0, 5)
+set a = mov_reg_mem(a, 1, 5, 88)
+set a = add_reg(a, 0, 1)
+set a = mov_reg_mem(a, 1, 5, 200)
+set a = cmp_reg(a, 0, 1)
+set a = je(a, "alias_next")
+set a = mov_reg_mem(a, 1, 0, 0)
+set a = cmp_reg_imm8(a, 1, 1)
+set a = jnz(a, "alias_next")
+set a = mov_reg_mem(a, 1, 0, 8)
+set a = mov_reg_mem(a, 2, 5, 192)
+set a = cmp_reg(a, 1, 2)
+set a = je(a, "alias_yes")
+set a = label(a, "alias_next")
+set a = inc_reg(a, 10)
+set a = jmp_label(a, "alias_loop")
+set a = label(a, "alias_no")
+set a = xor_reg(a, 0, 0)
+set a = ret(a)
+set a = label(a, "alias_yes")
+set a = mov_reg_imm32(a, 0, 1)
+set a = ret(a)
+set a = label(a, "cat_join")
+set a = mov_reg_reg(a, 1, 15)
+set a = add_reg(a, 1, 13)
+set a = jb(a, "oom")
+set a = mov_mem_reg(a, 5, 184, 1)
+set a = mov_mem_reg(a, 5, 136, 14)
+set a = mov_mem_reg(a, 5, 144, 15)
+set a = mov_mem_reg(a, 5, 152, 12)
+set a = mov_mem_reg(a, 5, 160, 13)
+set a = test_reg(a, 1, 1)
+set a = jz(a, "cat_empty")
+set a = mov_reg_mem(a, 0, 5, 80)
+set a = mov_reg_imm32(a, 2, 65536)
+set a = sub_reg(a, 0, 2)
+set a = mov_reg_mem(a, 11, 5, 72)
+set a = mov_reg_mem(a, 9, 5, 136)
+set a = cmp_reg(a, 9, 0)
+set a = jb(a, "cat_right")
+set a = cmp_reg(a, 9, 11)
+set a = jae(a, "cat_right")
+set a = mov_reg_mem(a, 8, 5, 144)
+set a = align_size(a, 8)
+set a = add_reg(a, 8, 9)
+set a = jb(a, "oom")
+set a = cmp_reg(a, 8, 11)
+set a = jnz(a, "cat_right")
+set a = mov_mem_reg(a, 5, 192, 9)
+set a = call_label(a, "alias")
+set a = test_reg(a, 0, 0)
+set a = jnz(a, "cat_right")
+set a = mov_reg_mem(a, 0, 5, 136)
+set a = mov_reg_mem(a, 1, 5, 184)
+set a = add_reg_imm8(a, 1, 7)
+set a = and_reg_imm8(a, 1, 248)
+set a = add_reg(a, 0, 1)
+set a = jb(a, "oom")
+set a = mov_reg_mem(a, 1, 5, 80)
+set a = cmp_reg(a, 0, 1)
+set a = ja(a, "oom")
+set a = mov_mem_reg(a, 5, 192, 0)
+set a = mov_reg_mem(a, 1, 5, 136)
+set a = mov_reg_mem(a, 8, 5, 144)
+set a = add_reg(a, 1, 8)
+set a = mov_reg_mem(a, 2, 5, 152)
+set a = mov_reg_mem(a, 8, 5, 160)
+set a = call_label(a, "memcpy")
+set a = mov_reg_mem(a, 0, 5, 192)
+set a = mov_mem_reg(a, 5, 72, 0)
+set a = jmp_label(a, "cat_done_left")
+set a = label(a, "cat_right")
+set a = mov_reg_mem(a, 0, 5, 80)
+set a = mov_reg_imm32(a, 2, 65536)
+set a = sub_reg(a, 0, 2)
+set a = mov_reg_mem(a, 11, 5, 72)
+set a = mov_reg_mem(a, 2, 5, 152)
+set a = cmp_reg(a, 2, 0)
+set a = jb(a, "cat_fresh")
+set a = cmp_reg(a, 2, 11)
+set a = jae(a, "cat_fresh")
+set a = mov_reg_mem(a, 8, 5, 160)
+set a = align_size(a, 8)
+set a = add_reg(a, 8, 2)
+set a = jb(a, "oom")
+set a = cmp_reg(a, 8, 11)
+set a = jnz(a, "cat_fresh")
+set a = mov_reg_mem(a, 9, 5, 136)
+set a = cmp_reg(a, 9, 0)
+set a = jb(a, "cat_fresh")
+set a = cmp_reg(a, 9, 11)
+set a = jae(a, "cat_fresh")
+set a = mov_reg_reg(a, 12, 2)
+set a = mov_reg_mem(a, 8, 5, 144)
+set a = align_size(a, 8)
+set a = add_reg(a, 8, 9)
+set a = jb(a, "oom")
+set a = cmp_reg(a, 8, 12)
+set a = jnz(a, "cat_fresh")
+set a = mov_mem_reg(a, 5, 192, 9)
+set a = call_label(a, "alias")
+set a = test_reg(a, 0, 0)
+set a = jnz(a, "cat_fresh")
+set a = mov_reg_mem(a, 0, 5, 152)
+set a = mov_mem_reg(a, 5, 192, 0)
+set a = call_label(a, "alias")
+set a = test_reg(a, 0, 0)
+set a = jnz(a, "cat_fresh")
+set a = mov_reg_mem(a, 0, 5, 136)
+set a = mov_reg_mem(a, 1, 5, 184)
+set a = add_reg_imm8(a, 1, 7)
+set a = and_reg_imm8(a, 1, 248)
+set a = add_reg(a, 0, 1)
+set a = jb(a, "oom")
+set a = mov_reg_mem(a, 1, 5, 80)
+set a = cmp_reg(a, 0, 1)
+set a = ja(a, "oom")
+set a = mov_mem_reg(a, 5, 192, 0)
+set a = mov_reg_mem(a, 1, 5, 136)
+set a = mov_reg_mem(a, 8, 5, 144)
+set a = add_reg(a, 1, 8)
+set a = mov_reg_mem(a, 2, 5, 152)
+set a = mov_reg_mem(a, 8, 5, 160)
+set a = call_label(a, "memcpy")
+set a = mov_reg_mem(a, 0, 5, 192)
+set a = mov_mem_reg(a, 5, 72, 0)
+set a = jmp_label(a, "cat_done_left")
+set a = label(a, "cat_fresh")
+set a = mov_reg_mem(a, 1, 5, 184)
+set a = call_label(a, "alloc")
+set a = mov_mem_reg(a, 5, 192, 0)
+set a = mov_reg_reg(a, 1, 0)
+set a = mov_reg_mem(a, 2, 5, 136)
+set a = mov_reg_mem(a, 8, 5, 144)
+set a = call_label(a, "memcpy")
+set a = mov_reg_mem(a, 1, 5, 192)
+set a = mov_reg_mem(a, 8, 5, 144)
+set a = add_reg(a, 1, 8)
+set a = mov_reg_mem(a, 2, 5, 152)
+set a = mov_reg_mem(a, 8, 5, 160)
+set a = call_label(a, "memcpy")
+set a = jmp_label(a, "cat_done_fresh")
+set a = label(a, "cat_empty")
+set a = xor_reg(a, 0, 0)
+set a = xor_reg(a, 2, 2)
+set a = jmp_label(a, "cat_publish")
+set a = label(a, "cat_done_left")
+set a = mov_reg_mem(a, 0, 5, 136)
+set a = mov_reg_mem(a, 2, 5, 184)
+set a = jmp_label(a, "cat_publish")
+set a = label(a, "cat_done_fresh")
+set a = mov_reg_mem(a, 0, 5, 192)
+set a = mov_reg_mem(a, 2, 5, 184)
+set a = label(a, "cat_publish")
+set a = mov_reg_mem(a, 1, 5, 200)
+set a = test_reg(a, 1, 1)
+set a = jz(a, "cat_push")
+set a = mov_mem_imm32(a, 1, 0, 1)
+set a = mov_mem_reg(a, 1, 8, 0)
+set a = mov_mem_reg(a, 1, 16, 2)
+set a = mov_mem_imm32(a, 1, 24, 0)
+set a = jmp_label(a, "dispatch")
+set a = label(a, "cat_push")
+set a = call_label(a, "push_bytes")
+set a = jmp_label(a, "dispatch")
+set a = label(a, "op_call")
+set a = call_label(a, "read_u16")
+set a = mov_reg_reg(a, 1, 0)
+set a = shl_reg_imm8(a, 1, 3)
+set a = mov_reg_reg(a, 2, 0)
+set a = shl_reg_imm8(a, 2, 4)
+set a = add_reg(a, 1, 2)
+set a = mov_reg_mem(a, 2, 5, 120)
+set a = add_reg(a, 1, 2)
+set a = mov_reg_mem(a, 12, 1, 0)
+set a = mov_reg_mem(a, 13, 1, 8)
+set a = mov_reg_mem(a, 14, 1, 16)
+set a = mov_reg_mem(a, 0, 5, 40)
+set a = cmp_reg_imm32(a, 0, 256)
+set a = jae(a, "depth_fail")
+set a = mov_reg_reg(a, 1, 0)
+set a = shl_reg_imm8(a, 1, 3)
+set a = mov_reg_reg(a, 2, 0)
+set a = shl_reg_imm8(a, 2, 4)
+set a = add_reg(a, 1, 2)
+set a = mov_reg_mem(a, 2, 5, 112)
+set a = add_reg(a, 1, 2)
+set a = mov_reg_mem(a, 0, 5, 16)
+set a = mov_mem_reg(a, 1, 0, 0)
+set a = mov_reg_mem(a, 0, 5, 32)
+set a = mov_mem_reg(a, 1, 8, 0)
+set a = mov_reg_mem(a, 0, 5, 24)
+set a = sub_reg(a, 0, 13)
+set a = mov_mem_reg(a, 1, 16, 0)
+set a = mov_mem_reg(a, 5, 32, 0)
+set a = mov_reg_reg(a, 15, 13)
+set a = label(a, "zero_loop")
+set a = cmp_reg(a, 15, 14)
+set a = jae(a, "zero_done")
+set a = mov_reg_mem(a, 1, 5, 32)
+set a = add_reg(a, 1, 15)
+set a = shl_reg_imm8(a, 1, 5)
+set a = mov_reg_mem(a, 0, 5, 88)
+set a = add_reg(a, 1, 0)
+set a = mov_mem_imm32(a, 1, 0, 0)
+set a = mov_mem_imm32(a, 1, 8, 0)
+set a = mov_mem_imm32(a, 1, 16, 0)
+set a = mov_mem_imm32(a, 1, 24, 0)
+set a = inc_reg(a, 15)
+set a = jmp_label(a, "zero_loop")
+set a = label(a, "zero_done")
+set a = mov_reg_mem(a, 0, 5, 32)
+set a = add_reg(a, 0, 14)
+set a = mov_mem_reg(a, 5, 24, 0)
+set a = mov_mem_reg(a, 5, 16, 12)
+set a = inc_mem(a, 5, 40)
+set a = jmp_label(a, "dispatch")
+set a = label(a, "op_ret")
+set a = call_label(a, "pop_cell")
+set a = mov_reg_mem(a, 0, 3, 0)
+set a = mov_mem_reg(a, 5, 136, 0)
+set a = mov_reg_mem(a, 0, 3, 8)
+set a = mov_mem_reg(a, 5, 144, 0)
+set a = mov_reg_mem(a, 0, 3, 16)
+set a = mov_mem_reg(a, 5, 152, 0)
+set a = mov_reg_mem(a, 0, 3, 24)
+set a = mov_mem_reg(a, 5, 160, 0)
+set a = dec_mem(a, 5, 40)
+set a = mov_reg_mem(a, 0, 5, 40)
+set a = mov_reg_reg(a, 1, 0)
+set a = shl_reg_imm8(a, 1, 3)
+set a = mov_reg_reg(a, 2, 0)
+set a = shl_reg_imm8(a, 2, 4)
+set a = add_reg(a, 1, 2)
+set a = mov_reg_mem(a, 2, 5, 112)
+set a = add_reg(a, 1, 2)
+set a = mov_reg_mem(a, 0, 1, 0)
+set a = mov_mem_reg(a, 5, 16, 0)
+set a = mov_reg_mem(a, 0, 1, 8)
+set a = mov_mem_reg(a, 5, 32, 0)
+set a = mov_reg_mem(a, 0, 1, 16)
+set a = mov_mem_reg(a, 5, 24, 0)
+set a = mov_reg_reg(a, 3, 5)
+set a = add_reg_imm32(a, 3, 136)
+set a = call_label(a, "push_cell")
+set a = jmp_label(a, "dispatch")
+set a = label(a, "op_ret_fail")
+set a = call_label(a, "pop_cell")
+set a = mov_reg_mem(a, 0, 3, 8)
+set a = mov_mem_reg(a, 5, 56, 0)
+set a = mov_reg_mem(a, 0, 3, 16)
+set a = mov_mem_reg(a, 5, 64, 0)
+set a = mov_mem_imm32(a, 5, 48, 1)
+set a = dec_mem(a, 5, 40)
+set a = mov_reg_mem(a, 0, 5, 40)
+set a = mov_reg_reg(a, 1, 0)
+set a = shl_reg_imm8(a, 1, 3)
+set a = mov_reg_reg(a, 2, 0)
+set a = shl_reg_imm8(a, 2, 4)
+set a = add_reg(a, 1, 2)
+set a = mov_reg_mem(a, 2, 5, 112)
+set a = add_reg(a, 1, 2)
+set a = mov_reg_mem(a, 0, 1, 0)
+set a = mov_mem_reg(a, 5, 16, 0)
+set a = mov_reg_mem(a, 0, 1, 8)
+set a = mov_mem_reg(a, 5, 32, 0)
+set a = mov_reg_mem(a, 0, 1, 16)
+set a = mov_mem_reg(a, 5, 24, 0)
+set a = jmp_label(a, "dispatch")
+set a = label(a, "op_dec")
+set a = call_label(a, "pop_cell")
+set a = mov_reg_mem(a, 0, 3, 8)
+set a = test_reg(a, 0, 0)
+set a = jz(a, "dec_zero")
+set a = mov_reg_imm64(a, 1, -9223372036854775808)
+set a = cmp_reg(a, 0, 1)
+set a = je(a, "dec_min")
+set a = test_reg(a, 0, 0)
+set a = jcc(a, 8, "dec_neg")
+set a = mov_reg_imm32(a, 12, 0)
+set a = jmp_label(a, "dec_digits")
+set a = label(a, "dec_neg")
+set a = neg_reg(a, 0)
+set a = mov_reg_imm32(a, 12, 1)
+set a = label(a, "dec_digits")
+set a = mov_reg_reg(a, 7, 5)
+set a = add_reg_imm32(a, 7, 240)
+set a = xor_reg(a, 13, 13)
+set a = label(a, "digit_loop")
+set a = xor_reg(a, 2, 2)
+set a = mov_reg_imm32(a, 1, 10)
+set a = udiv_reg(a, 1)
+set a = add_reg_imm8(a, 2, 48)
+set a = dec_reg(a, 7)
+set a = mov_mem8_reg(a, 7, 0, 2)
+set a = inc_reg(a, 13)
+set a = test_reg(a, 0, 0)
+set a = jnz(a, "digit_loop")
+set a = test_reg(a, 12, 12)
+set a = jz(a, "dec_store")
+set a = dec_reg(a, 7)
+set a = mov_reg_imm32(a, 2, 45)
+set a = mov_mem8_reg(a, 7, 0, 2)
+set a = inc_reg(a, 13)
+set a = label(a, "dec_store")
+set a = mov_mem_reg(a, 5, 184, 7)
+set a = mov_mem_reg(a, 5, 192, 13)
+set a = mov_reg_reg(a, 1, 13)
+set a = call_label(a, "alloc")
+set a = mov_mem_reg(a, 5, 200, 0)
+set a = mov_reg_reg(a, 1, 0)
+set a = mov_reg_mem(a, 2, 5, 184)
+set a = mov_reg_mem(a, 8, 5, 192)
+set a = call_label(a, "memcpy")
+set a = mov_reg_mem(a, 0, 5, 200)
+set a = mov_reg_mem(a, 2, 5, 192)
+set a = call_label(a, "push_bytes")
+set a = jmp_label(a, "dispatch")
+set a = label(a, "dec_zero")
+set a = lea_rip(a, 0, "zeroch")
+set a = mov_reg_imm32(a, 2, 1)
+set a = call_label(a, "push_bytes")
+set a = jmp_label(a, "dispatch")
+set a = label(a, "dec_min")
+set a = lea_rip(a, 0, "mintext")
+set a = mov_reg_imm32(a, 2, 20)
+set a = call_label(a, "push_bytes")
+set a = jmp_label(a, "dispatch")
+set a = label(a, "op_pop")
+set a = call_label(a, "read_u16")
+set a = mov_reg_reg(a, 12, 0)
+set a = call_label(a, "pop_cell")
+set a = mov_reg_reg(a, 13, 3)
+set a = mov_reg_mem(a, 0, 5, 32)
+set a = add_reg(a, 0, 12)
+set a = shl_reg_imm8(a, 0, 5)
+set a = mov_reg_mem(a, 12, 5, 88)
+set a = add_reg(a, 12, 0)
+set a = mov_reg_mem(a, 0, 13, 0)
+set a = mov_mem_reg(a, 12, 0, 0)
+set a = mov_reg_mem(a, 0, 13, 8)
+set a = mov_mem_reg(a, 12, 8, 0)
+set a = mov_reg_mem(a, 0, 13, 16)
+set a = mov_mem_reg(a, 12, 16, 0)
+set a = mov_reg_mem(a, 0, 13, 24)
+set a = mov_mem_reg(a, 12, 24, 0)
+set a = jmp_label(a, "dispatch")
+set a = label(a, "op_jump")
+set a = call_label(a, "read_i32")
+set a = add_mem_reg(a, 5, 16, 0)
+set a = jmp_label(a, "dispatch")
+set a = label(a, "op_jz")
+set a = call_label(a, "pop_cell")
+set a = mov_reg_mem(a, 12, 3, 8)
+set a = call_label(a, "read_i32")
+set a = test_reg(a, 12, 12)
+set a = jnz(a, "dispatch")
+set a = add_mem_reg(a, 5, 16, 0)
+set a = jmp_label(a, "dispatch")
+set a = label(a, "op_clear")
+set a = mov_mem_imm32(a, 5, 48, 0)
+set a = jmp_label(a, "dispatch")
+set a = label(a, "op_cmp")
+set a = call_label(a, "read_u8")
+set a = mov_reg_reg(a, 13, 0)
+set a = call_label(a, "pop_cell")
+set a = mov_reg_mem(a, 12, 3, 8)
+set a = call_label(a, "pop_cell")
+set a = mov_reg_mem(a, 0, 3, 8)
+set a = cmp_reg_imm8(a, 13, 0)
+set a = je(a, "cmp_eq")
+set a = cmp_reg_imm8(a, 13, 1)
+set a = je(a, "cmp_ne")
+set a = cmp_reg_imm8(a, 13, 2)
+set a = je(a, "cmp_lt")
+set a = cmp_reg_imm8(a, 13, 3)
+set a = je(a, "cmp_gt")
+set a = cmp_reg_imm8(a, 13, 4)
+set a = je(a, "cmp_le")
+set a = label(a, "cmp_ge")
+set a = xor_reg(a, 1, 1)
+set a = cmp_reg(a, 0, 12)
+set a = setcc(a, 157, 1)
+set a = jmp_label(a, "cmp_push")
+set a = label(a, "cmp_eq")
+set a = xor_reg(a, 1, 1)
+set a = cmp_reg(a, 0, 12)
+set a = setcc(a, 148, 1)
+set a = jmp_label(a, "cmp_push")
+set a = label(a, "cmp_ne")
+set a = xor_reg(a, 1, 1)
+set a = cmp_reg(a, 0, 12)
+set a = setcc(a, 149, 1)
+set a = jmp_label(a, "cmp_push")
+set a = label(a, "cmp_lt")
+set a = xor_reg(a, 1, 1)
+set a = cmp_reg(a, 0, 12)
+set a = setcc(a, 156, 1)
+set a = jmp_label(a, "cmp_push")
+set a = label(a, "cmp_gt")
+set a = xor_reg(a, 1, 1)
+set a = cmp_reg(a, 0, 12)
+set a = setcc(a, 159, 1)
+set a = jmp_label(a, "cmp_push")
+set a = label(a, "cmp_le")
+set a = xor_reg(a, 1, 1)
+set a = cmp_reg(a, 0, 12)
+set a = setcc(a, 158, 1)
+set a = label(a, "cmp_push")
+set a = mov_reg_reg(a, 0, 1)
+set a = call_label(a, "push_i64")
+set a = jmp_label(a, "dispatch")
+
+  return a
+end
+
+fn eqb(left: bytes, right: bytes) -> i64
+  let n = len(left)
+  if n != len(right)
+    return 0
+  end
+  let i = 0
+  let same = 1
+  while i < n
+    if at(left, i) != at(right, i)
+      set same = 0
+    end
+    set i = i + 1 else fail "math"
+  end
+  return same
+end
+
+fn at_or(text: bytes, i: i64) -> i64
+  if i < 0
+    return -1
+  end
+  if i >= len(text)
+    return -1
+  end
+  return at(text, i) else fail "byte"
+end
+
+fn is_letter(c: i64) -> i64
+  if c >= 65
+    if c <= 90
+      return 1
+    end
+  end
+  if c >= 97
+    if c <= 122
+      return 1
+    end
+  end
+  return 0
+end
+
+fn is_digit(c: i64) -> i64
+  if c >= 48
+    if c <= 57
+      return 1
+    end
+  end
+  return 0
+end
+
+fn is_ident(c: i64) -> i64
+  if is_letter(c)
+    return 1
+  end
+  if is_digit(c)
+    return 1
+  end
+  if c == 95
+    return 1
+  end
+  return 0
+end
+
+fn read_ident(text: bytes, i: i64) -> step
+  let j = i
+  let n = len(text)
+  let raw = ""
+  let go = 1
+  while go
+    if j >= n
+      set go = 0
+    else
+      let c = at_or(text, j)
+      if is_ident(c)
+        set raw = raw ++ byte(c)
+        set j = j + 1 else fail "math"
+      else
+        set go = 0
+      end
+    end
+  end
+  return step(tok(1, 0, raw), j)
+end
+
+fn read_number(text: bytes, i: i64) -> step
+  let j = i
+  let n = len(text)
+  let raw = ""
+  let go = 1
+  while go
+    if j >= n
+      set go = 0
+    else
+      let c = at_or(text, j)
+      if is_digit(c)
+        set raw = raw ++ byte(c)
+        set j = j + 1 else fail "math"
+      else
+        set go = 0
+      end
+    end
+  end
+  let num = i64(raw) else fail "bad integer"
+  return step(tok(2, num, raw), j)
+end
+
+fn read_string(text: bytes, i: i64) -> step
+  let j = i + 1 else fail "math"
+  let raw = ""
+  let n = len(text)
+  let closed = 0
+  let go = 1
+  while go
+    if j >= n
+      set go = 0
+    else
+      let c = at_or(text, j)
+      if c == 34
+        set j = j + 1 else fail "math"
+        set closed = 1
+        set go = 0
+      else
+        if c == 92
+          let e = at_or(text, j + 1)
+          let ch = 0
+          if e == 110
+            set ch = 10
+          end
+          if e == 92
+            set ch = 92
+          end
+          if e == 34
+            set ch = 34
+          end
+          if ch == 0
+            fail "bad escape"
+          end
+          set raw = raw ++ byte(ch)
+          set j = j + 2 else fail "math"
+        else
+          set raw = raw ++ byte(c)
+          set j = j + 1 else fail "math"
+        end
+      end
+    end
+  end
+  if closed == 0
+    fail "unterminated string"
+  end
+  return step(tok(3, 0, raw), j)
+end
+
+fn lex(text: bytes) -> list tok
+  let toks: list tok = list()
+  let i = 0
+  let n = len(text)
+  while i < n
+    let c = at_or(text, i)
+    if c == 32
+      set i = i + 1 else fail "math"
+    else
+      if c == 9
+        set i = i + 1 else fail "math"
+      else
+        if c == 13
+          set i = i + 1 else fail "math"
+        else
+          if c == 35
+            set i = n
+          else
+            if c == 34
+              let got = read_string(text, i)
+              set toks = push(toks, got.tok)
+              set i = got.pos
+            else
+              if is_letter(c)
+                let got = read_ident(text, i)
+                set toks = push(toks, got.tok)
+                set i = got.pos
+              else
+                if c == 95
+                  let got = read_ident(text, i)
+                  set toks = push(toks, got.tok)
+                  set i = got.pos
+                else
+                  if is_digit(c)
+                    let got = read_number(text, i)
+                    set toks = push(toks, got.tok)
+                    set i = got.pos
+                  else
+                    if c == 43
+                      if at_or(text, i + 1) == 43
+                        set toks = push(toks, tok(5, 0, ""))
+                        set i = i + 2 else fail "math"
+                      else
+                        set toks = push(toks, tok(4, 0, ""))
+                        set i = i + 1 else fail "math"
+                      end
+                    else
+                      if c == 45
+                        if at_or(text, i + 1) == 62
+                          set toks = push(toks, tok(10, 0, ""))
+                          set i = i + 2 else fail "math"
+                        else
+                          set toks = push(toks, tok(11, 0, ""))
+                          set i = i + 1 else fail "math"
+                        end
+                      else
+                        if c == 40
+                          set toks = push(toks, tok(6, 0, ""))
+                          set i = i + 1 else fail "math"
+                        else
+                          if c == 41
+                            set toks = push(toks, tok(7, 0, ""))
+                            set i = i + 1 else fail "math"
+                          else
+                            if c == 44
+                              set toks = push(toks, tok(8, 0, ""))
+                              set i = i + 1 else fail "math"
+                            else
+                              if c == 58
+                                set toks = push(toks, tok(9, 0, ""))
+                                set i = i + 1 else fail "math"
+                              else
+                                if c == 61
+                                  if at_or(text, i + 1) == 61
+                                    set toks = push(toks, tok(13, 0, ""))
+                                    set i = i + 2 else fail "math"
+                                  else
+                                    set toks = push(toks, tok(12, 0, ""))
+                                    set i = i + 1 else fail "math"
+                                  end
+                                else
+                                  if c == 33
+                                    if at_or(text, i + 1) != 61
+                                      fail "bad character"
+                                    end
+                                    set toks = push(toks, tok(14, 0, ""))
+                                    set i = i + 2 else fail "math"
+                                  else
+                                    if c == 60
+                                      if at_or(text, i + 1) == 61
+                                        set toks = push(toks, tok(17, 0, ""))
+                                        set i = i + 2 else fail "math"
+                                      else
+                                        set toks = push(toks, tok(15, 0, ""))
+                                        set i = i + 1 else fail "math"
+                                      end
+                                    else
+                                      if c == 62
+                                        if at_or(text, i + 1) == 61
+                                          set toks = push(toks, tok(18, 0, ""))
+                                          set i = i + 2 else fail "math"
+                                        else
+                                          set toks = push(toks, tok(16, 0, ""))
+                                          set i = i + 1 else fail "math"
+                                        end
+                                      else
+                                        fail "bad character"
+                                      end
+                                    end
+                                  end
+                                end
+                              end
+                            end
+                          end
+                        end
+                      end
+                    end
+                  end
+                end
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+  return toks
+end
+
+fn tok_is(toks: list tok, pos: i64, kind: i64) -> i64
+  if pos < 0
+    return 0
+  end
+  if pos >= len(toks)
+    return 0
+  end
+  if at(toks, pos).kind == kind
+    return 1
+  end
+  return 0
+end
+
+fn spawn(code: bytes, pool: bytes, nconst: i64, strs: bytes, funcs: bytes, jumps: list fixup, marks: map bytes i64, imap: map i64 i64, bmap: map bytes i64, smap: map bytes i64, fnames: map bytes i64, arity: map bytes i64, slots: map bytes i64, unwind: bytes, main_off: i64, main_slots: i64, saw_main: i64, live: i64, start: i64, nparams: i64, is_main: i64, seen: i64, cbuf: buf, blocks: list block, failto: bytes, pbuf: buf) -> prog
+  return prog(code, pool, nconst, strs, funcs, jumps, marks, imap, bmap, smap, fnames, arity, slots, unwind, main_off, main_slots, saw_main, live, start, nparams, is_main, seen, cbuf, blocks, failto, pbuf)
+end
+
+fn with_code(p: prog, code: bytes) -> prog
+  return spawn(code, p.pool, p.nconst, p.strs, p.funcs, p.jumps, p.marks, p.imap, p.bmap, p.smap, p.fnames, p.arity, p.slots, p.unwind, p.main_off, p.main_slots, p.saw_main, p.live, p.start, p.nparams, p.is_main, p.seen, p.cbuf, p.blocks, p.failto, p.pbuf)
+end
+
+fn with_cbuf(p: prog, cbuf: buf) -> prog
+  return spawn(p.code, p.pool, p.nconst, p.strs, p.funcs, p.jumps, p.marks, p.imap, p.bmap, p.smap, p.fnames, p.arity, p.slots, p.unwind, p.main_off, p.main_slots, p.saw_main, p.live, p.start, p.nparams, p.is_main, p.seen, cbuf, p.blocks, p.failto, p.pbuf)
+end
+
+fn with_jumps(p: prog, jumps: list fixup) -> prog
+  return spawn(p.code, p.pool, p.nconst, p.strs, p.funcs, jumps, p.marks, p.imap, p.bmap, p.smap, p.fnames, p.arity, p.slots, p.unwind, p.main_off, p.main_slots, p.saw_main, p.live, p.start, p.nparams, p.is_main, p.seen, p.cbuf, p.blocks, p.failto, p.pbuf)
+end
+
+fn with_code_jumps(p: prog, code: bytes, jumps: list fixup) -> prog
+  return spawn(code, p.pool, p.nconst, p.strs, p.funcs, jumps, p.marks, p.imap, p.bmap, p.smap, p.fnames, p.arity, p.slots, p.unwind, p.main_off, p.main_slots, p.saw_main, p.live, p.start, p.nparams, p.is_main, p.seen, p.cbuf, p.blocks, p.failto, p.pbuf)
+end
+
+fn with_pool_i(p: prog, pbuf: buf, nconst: i64, imap: map i64 i64) -> prog
+  return spawn(p.code, p.pool, nconst, p.strs, p.funcs, p.jumps, p.marks, imap, p.bmap, p.smap, p.fnames, p.arity, p.slots, p.unwind, p.main_off, p.main_slots, p.saw_main, p.live, p.start, p.nparams, p.is_main, p.seen, p.cbuf, p.blocks, p.failto, pbuf)
+end
+
+fn with_pool_b(p: prog, pbuf: buf, nconst: i64, strs: bytes, bmap: map bytes i64, smap: map bytes i64) -> prog
+  return spawn(p.code, p.pool, nconst, strs, p.funcs, p.jumps, p.marks, p.imap, bmap, smap, p.fnames, p.arity, p.slots, p.unwind, p.main_off, p.main_slots, p.saw_main, p.live, p.start, p.nparams, p.is_main, p.seen, p.cbuf, p.blocks, p.failto, pbuf)
+end
+
+
+fn fresh(fnames: map bytes i64, arity: map bytes i64) -> prog
+  let jumps: list fixup = list()
+  let marks: map bytes i64 = map()
+  let imap: map i64 i64 = map()
+  let bmap: map bytes i64 = map()
+  let smap: map bytes i64 = map()
+  let slots: map bytes i64 = map()
+  let blocks: list block = list()
+  set bmap = put(bmap, "\n", 0)
+  return spawn("", "", 0, "\n", "", jumps, marks, imap, bmap, smap, fnames, arity, slots, "", 0, 0, 0, 0, 0, 0, 0, 0, bnew(), blocks, "", bnew())
+end
+
+fn enter_fn(p: prog, name: bytes, slots: map bytes i64) -> prog
+  let nparams = get(p.arity, name) else fail "missing fn"
+  let is_main = eqb(name, "main")
+  let unwind = "u" ++ p.seen
+  let blocks: list block = list()
+  return spawn(p.code, p.pool, p.nconst, p.strs, p.funcs, p.jumps, p.marks, p.imap, p.bmap, p.smap, p.fnames, p.arity, slots, unwind, p.main_off, p.main_slots, p.saw_main, 1, p.cbuf.count, nparams, is_main, p.seen, p.cbuf, blocks, unwind, p.pbuf)
+end
+
+fn close_fn(p: prog) -> prog
+  if len(p.blocks) != 0
+    fail "unclosed block"
+  end
+  let cur = p
+  if p.is_main != 0
+    set cur = take_code(cur, byte(0))
+  end
+  let marks = put(cur.marks, cur.unwind, cur.cbuf.count)
+  set cur = take_code(cur, byte(29))
+  if cur.is_main != 0
+    set cur = take_code(cur, byte(2))
+  end
+  if cur.is_main == 0
+    set cur = take_code(cur, byte(32))
+  end
+  let nlocals = len(cur.slots)
+  let funcs = cur.funcs ++ q8(cur.start) ++ q8(cur.nparams) ++ q8(nlocals)
+  let main_off = cur.main_off
+  let main_slots = cur.main_slots
+  let saw = cur.saw_main
+  if cur.is_main != 0
+    set main_off = cur.start
+    set main_slots = nlocals
+    set saw = 1
+  end
+  return spawn(p.code, p.pool, p.nconst, p.strs, funcs, p.jumps, marks, p.imap, p.bmap, p.smap, p.fnames, p.arity, p.slots, p.unwind, main_off, main_slots, saw, 0, p.start, p.nparams, p.is_main, cur.seen + 1 else fail "math", cur.cbuf, cur.blocks, cur.failto, cur.pbuf)
+end
+
+fn take_code(p: prog, extra: bytes) -> prog
+  return with_cbuf(p, badd(p.cbuf, extra))
+end
+
+fn finish_code(p: prog) -> prog
+  return with_code(p, bfinish(p.cbuf))
+end
+
+fn emit_iffail(p: prog) -> prog
+  let slot = p.cbuf.count + 1 else fail "math"
+  let jumps = push(p.jumps, fixup(slot, p.failto))
+  let marked = with_jumps(p, jumps)
+  return take_code(marked, byte(11) ++ byte(0) ++ byte(0) ++ byte(0) ++ byte(0))
+end
+
+fn intern_i64(p: prog, n: i64) -> prog
+  if has(p.imap, n)
+    return p
+  end
+  let rec = pool_rec(0, n, 0, 0)
+  let pbuf = bpush(p.pbuf, rec)
+  let imap = put(p.imap, n, p.nconst)
+  return with_pool_i(p, pbuf, p.nconst + 1 else fail "math", imap)
+end
+
+fn push_i64(p: prog, n: i64) -> prog
+  let q = intern_i64(p, n)
+  let idx = get(q.imap, n) else fail "const"
+  return take_code(q, byte(5) ++ u16(idx))
+end
+
+fn intern_bytes(p: prog, data: bytes) -> prog
+  if has(p.smap, data)
+    return p
+  end
+  let off = 0
+  let strs = p.strs
+  let bmap = p.bmap
+  if has(p.bmap, data)
+    set off = get(p.bmap, data) else fail "const"
+  else
+    set off = len(p.strs)
+    set strs = p.strs ++ data
+    set bmap = put(p.bmap, data, off)
+  end
+  let rec = pool_rec(257, off, len(data), 0)
+  let pbuf = bpush(p.pbuf, rec)
+  let smap = put(p.smap, data, p.nconst)
+  return with_pool_b(p, pbuf, p.nconst + 1 else fail "math", strs, bmap, smap)
+end
+
+fn push_bytes(p: prog, data: bytes) -> prog
+  let q = intern_bytes(p, data)
+  let idx = get(q.smap, data) else fail "const"
+  return take_code(q, byte(5) ++ u16(idx))
+end
+
+fn slot_index(raw: i64) -> i64
+  if raw >= 1024
+    let kind = raw / 1024 else fail "math"
+    return raw - kind * 1024 else fail "math"
+  end
+  return raw
+end
+
+fn slot_kind(raw: i64) -> i64
+  if raw >= 1024
+    return raw / 1024 else fail "math"
+  end
+  return 1
+end
+
+fn pack_slot(index: i64, kind: i64) -> i64
+  let scaled = kind * 1024 else fail "math"
+  return index + scaled else fail "math"
+end
+
+fn push_local(p: prog, name: bytes) -> prog
+  if has(p.slots, name) == 0
+    fail "unknown name"
+  end
+  let raw = get(p.slots, name) else fail "unknown name"
+  let slot = slot_index(raw)
+  return take_code(p, byte(7) ++ u16(slot))
+end
+
+fn do_dec(cur: parsed) -> parsed
+  return parsed(take_code(cur.prog, byte(34)), cur.pos, 2)
+end
+
+fn emit_add(p: prog) -> prog
+  return emit_iffail(take_code(p, byte(13)))
+end
+
+fn emit_cat(p: prog) -> prog
+  return take_code(p, byte(19))
+end
+
+fn parse_atom(p: prog, toks: list tok, pos: i64) -> parsed
+  if pos >= len(toks)
+    fail "expected expression"
+  end
+  let kind = at(toks, pos).kind
+  if kind == 2
+    let nxt = push_i64(p, at(toks, pos).num)
+    return parsed(nxt, pos + 1 else fail "math", 1)
+  end
+  if kind == 3
+    let nxt2 = push_bytes(p, at(toks, pos).text)
+    return parsed(nxt2, pos + 1 else fail "math", 2)
+  end
+  if kind == 6
+    let inner = parse_expr(p, toks, pos + 1 else fail "math")
+    if tok_is(toks, inner.pos, 7) == 0
+      fail "expected )"
+    end
+    return parsed(inner.prog, inner.pos + 1 else fail "math", inner.kind)
+  end
+  if kind == 1
+    if eqb(at(toks, pos).text, "fail")
+      return parse_fail_expr(p, toks, pos)
+    end
+    if tok_is(toks, pos + 1 else fail "math", 6)
+      return parse_call(p, toks, pos)
+    end
+    let nxt3 = push_local(p, at(toks, pos).text)
+    let raw = get(p.slots, at(toks, pos).text) else fail "unknown name"
+    return parsed(nxt3, pos + 1 else fail "math", slot_kind(raw))
+  end
+  fail "bad expression"
+  return parsed(p, pos, 0)
+end
+
+fn parse_call(p: prog, toks: list tok, pos: i64) -> parsed
+  let name = at(toks, pos).text
+  if has(p.fnames, name) == 0
+    fail "unknown function"
+  end
+  let want = get(p.arity, name) else fail "arity"
+  let i = pos + 2 else fail "math"
+  let cur = parsed(p, i, 1)
+  let got = 0
+  if tok_is(toks, i, 7)
+    set i = i + 1 else fail "math"
+  else
+    set cur = parse_expr(p, toks, i)
+    set got = 1
+    set i = cur.pos
+    while tok_is(toks, i, 8)
+      set cur = parse_expr(cur.prog, toks, i + 1 else fail "math")
+      set got = got + 1 else fail "math"
+      set i = cur.pos
+    end
+    if tok_is(toks, i, 7) == 0
+      fail "expected )"
+    end
+    set i = i + 1 else fail "math"
+  end
+  if got != want
+    fail "arity"
+  end
+  let idx = get(p.fnames, name) else fail "unknown function"
+  let called = take_code(cur.prog, byte(30) ++ u16(idx))
+  let failed = emit_iffail(called)
+  return parsed(failed, i, 1)
+end
+
+fn parse_sum(p: prog, toks: list tok, pos: i64) -> parsed
+  let cur = parse_atom(p, toks, pos)
+  while tok_is(toks, cur.pos, 4)
+    let right = parse_atom(cur.prog, toks, cur.pos + 1 else fail "math")
+    let added = emit_add(right.prog)
+    set cur = parsed(added, right.pos, 1)
+  end
+  return cur
+end
+
+
+fn emit_return(p: prog, toks: list tok) -> prog
+  let cur = parse_expr(p, toks, 1)
+  if cur.pos != len(toks)
+    fail "extra tokens"
+  end
+  return take_code(cur.prog, byte(31))
+end
+
+fn emit_write(p: prog, toks: list tok) -> prog
+  let cur = parse_expr(p, toks, 1)
+  if cur.pos != len(toks)
+    fail "extra tokens"
+  end
+  let outp = cur
+  if cur.kind == 1
+    set outp = do_dec(cur)
+  end
+  return take_code(outp.prog, byte(1))
+end
+
+fn bind_params(toks: list tok) -> map bytes i64
+  let slots: map bytes i64 = map()
+  let i = 0
+  let n = len(toks)
+  let slot = 0
+  while i < n
+    if at(toks, i).kind == 9
+      let name = at(toks, i - 1 else fail "math").text
+      set slots = put(slots, name, slot)
+      set slot = slot + 1 else fail "math"
+    end
+    set i = i + 1 else fail "math"
+  end
+  return slots
+end
+
+fn with_marks(p: prog, marks: map bytes i64) -> prog
+  return spawn(p.code, p.pool, p.nconst, p.strs, p.funcs, p.jumps, marks, p.imap, p.bmap, p.smap, p.fnames, p.arity, p.slots, p.unwind, p.main_off, p.main_slots, p.saw_main, p.live, p.start, p.nparams, p.is_main, p.seen, p.cbuf, p.blocks, p.failto, p.pbuf)
+end
+
+fn with_slots(p: prog, slots: map bytes i64) -> prog
+  return spawn(p.code, p.pool, p.nconst, p.strs, p.funcs, p.jumps, p.marks, p.imap, p.bmap, p.smap, p.fnames, p.arity, slots, p.unwind, p.main_off, p.main_slots, p.saw_main, p.live, p.start, p.nparams, p.is_main, p.seen, p.cbuf, p.blocks, p.failto, p.pbuf)
+end
+
+fn with_seen(p: prog, seen: i64) -> prog
+  return spawn(p.code, p.pool, p.nconst, p.strs, p.funcs, p.jumps, p.marks, p.imap, p.bmap, p.smap, p.fnames, p.arity, p.slots, p.unwind, p.main_off, p.main_slots, p.saw_main, p.live, p.start, p.nparams, p.is_main, seen, p.cbuf, p.blocks, p.failto, p.pbuf)
+end
+
+fn with_failto(p: prog, failto: bytes) -> prog
+  return spawn(p.code, p.pool, p.nconst, p.strs, p.funcs, p.jumps, p.marks, p.imap, p.bmap, p.smap, p.fnames, p.arity, p.slots, p.unwind, p.main_off, p.main_slots, p.saw_main, p.live, p.start, p.nparams, p.is_main, p.seen, p.cbuf, p.blocks, failto, p.pbuf)
+end
+
+fn with_blocks(p: prog, blocks: list block) -> prog
+  return spawn(p.code, p.pool, p.nconst, p.strs, p.funcs, p.jumps, p.marks, p.imap, p.bmap, p.smap, p.fnames, p.arity, p.slots, p.unwind, p.main_off, p.main_slots, p.saw_main, p.live, p.start, p.nparams, p.is_main, p.seen, p.cbuf, blocks, p.failto, p.pbuf)
+end
+
+fn drop_last(xs: list block) -> list block
+  let out: list block = list()
+  let i = 0
+  let n = len(xs) - 1 else fail "math"
+  while i < n
+    set out = push(out, at(xs, i) else fail "block")
+    set i = i + 1 else fail "math"
+  end
+  return out
+end
+
+fn emit_rel(p: prog, op: i64, name: bytes) -> prog
+  let slot = p.cbuf.count + 1 else fail "math"
+  let jumps = push(p.jumps, fixup(slot, name))
+  let marked = with_jumps(p, jumps)
+  return take_code(marked, byte(op) ++ byte(0) ++ byte(0) ++ byte(0) ++ byte(0))
+end
+
+fn mark_prog(p: prog, name: bytes) -> prog
+  return with_marks(p, put(p.marks, name, p.cbuf.count))
+end
+
+fn has_else(toks: list tok, pos: i64) -> i64
+  let i = pos
+  let depth = 0
+  let n = len(toks)
+  while i < n
+    let k = at(toks, i).kind else fail "token"
+    if k == 6
+      set depth = depth + 1 else fail "math"
+    end
+    if k == 7
+      set depth = depth - 1 else fail "math"
+    end
+    if depth == 0
+      if k == 1
+        if eqb(at(toks, i).text, "else")
+          return i
+        end
+      end
+    end
+    set i = i + 1 else fail "math"
+  end
+  return -1
+end
+
+fn parse_fail_expr(p: prog, toks: list tok, pos: i64) -> parsed
+  let msg = parse_concat(p, toks, pos + 1 else fail "math")
+  let shown = msg
+  if msg.kind == 1
+    set shown = do_dec(msg)
+  end
+  let op = 32
+  if p.is_main != 0
+    set op = 2
+  end
+  return parsed(take_code(shown.prog, byte(op)), shown.pos, 0)
+end
+
+fn parse_cmp(p: prog, toks: list tok, pos: i64) -> parsed
+  let cur = parse_sum(p, toks, pos)
+  let k = 0
+  if cur.pos < len(toks)
+    set k = at(toks, cur.pos).kind
+  end
+  if k < 13
+    return cur
+  end
+  if k > 18
+    return cur
+  end
+  let right = parse_sum(cur.prog, toks, cur.pos + 1 else fail "math")
+  let code = k - 13 else fail "math"
+  let cmpd = take_code(right.prog, byte(18) ++ byte(code))
+  return parsed(cmpd, right.pos, 1)
+end
+
+fn parse_concat(p: prog, toks: list tok, pos: i64) -> parsed
+  let cur = parse_cmp(p, toks, pos)
+  while tok_is(toks, cur.pos, 5)
+    if cur.kind == 1
+      set cur = do_dec(cur)
+    end
+    let right = parse_cmp(cur.prog, toks, cur.pos + 1 else fail "math")
+    let rhs = right
+    if right.kind == 1
+      set rhs = do_dec(right)
+    end
+    let cat = emit_cat(rhs.prog)
+    set cur = parsed(cat, rhs.pos, 2)
+  end
+  return cur
+end
+
+fn parse_expr(p: prog, toks: list tok, pos: i64) -> parsed
+  let at_else = has_else(toks, pos)
+  if at_else < 0
+    return parse_concat(p, toks, pos)
+  end
+  let cleared = take_code(p, byte(12))
+  let n = cleared.seen + 1 else fail "math"
+  let alt = "a" ++ n
+  let done = "d" ++ n
+  let saved = cleared.failto
+  let armed = with_failto(with_seen(cleared, n), alt)
+  let left = parse_concat(armed, toks, pos)
+  if left.pos != at_else
+    fail "bad else"
+  end
+  let jumped = emit_rel(left.prog, 8, done)
+  let marked = mark_prog(jumped, alt)
+  let restored = with_failto(marked, saved)
+  let again = take_code(restored, byte(12))
+  let right = parse_expr(again, toks, at_else + 1 else fail "math")
+  let finished = mark_prog(right.prog, done)
+  let kind = left.kind
+  if kind == 0
+    set kind = right.kind
+  end
+  if right.kind != 0
+    if left.kind != 0
+      if left.kind != right.kind
+        fail "type"
+      end
+    end
+  end
+  return parsed(finished, right.pos, kind)
+end
+
+fn emit_let(p: prog, toks: list tok) -> prog
+  if len(toks) < 4
+    fail "expected a name"
+  end
+  if at(toks, 1).kind != 1
+    fail "expected a name"
+  end
+  if at(toks, 2).kind != 12
+    fail "expected ="
+  end
+  let name = at(toks, 1).text
+  if has(p.slots, name)
+    fail "already bound"
+  end
+  let cur = parse_expr(p, toks, 3)
+  if cur.pos != len(toks)
+    fail "extra tokens"
+  end
+  if cur.kind == 0
+    fail "let needs a value"
+  end
+  let slot = len(p.slots)
+  let slots = put(cur.prog.slots, name, pack_slot(slot, cur.kind))
+  let bound = with_slots(cur.prog, slots)
+  return take_code(bound, byte(6) ++ u16(slot))
+end
+
+fn emit_append(p: prog, toks: list tok, name: bytes, slot: i64) -> prog
+  if len(toks) < 5
+    return p
+  end
+  if at(toks, 3).kind != 1
+    return p
+  end
+  if eqb(at(toks, 3).text, name) == 0
+    return p
+  end
+  if at(toks, 4).kind != 5
+    return p
+  end
+  if has_else(toks, 3) >= 0
+    return p
+  end
+  let rhs = parse_expr(p, toks, 5)
+  if rhs.pos != len(toks)
+    fail "extra tokens"
+  end
+  if rhs.kind == 0
+    fail "set needs a value"
+  end
+  let right = rhs
+  if rhs.kind == 1
+    set right = do_dec(rhs)
+  end
+  let slots = put(right.prog.slots, name, pack_slot(slot, 2))
+  let bound = with_slots(right.prog, slots)
+  return take_code(bound, byte(33) ++ u16(slot))
+end
+
+fn emit_set(p: prog, toks: list tok) -> prog
+  if len(toks) < 4
+    fail "expected a name"
+  end
+  if at(toks, 1).kind != 1
+    fail "expected a name"
+  end
+  if at(toks, 2).kind != 12
+    fail "expected ="
+  end
+  let name = at(toks, 1).text
+  if has(p.slots, name) == 0
+    fail "unknown name"
+  end
+  let raw = get(p.slots, name) else fail "unknown name"
+  let slot = slot_index(raw)
+  if slot < p.nparams
+    fail "parameter"
+  end
+  if slot_kind(raw) == 2
+    let appended = emit_append(p, toks, name, slot)
+    if appended.cbuf.count != p.cbuf.count
+      return appended
+    end
+  end
+  let cur = parse_expr(p, toks, 3)
+  if cur.pos != len(toks)
+    fail "extra tokens"
+  end
+  if cur.kind == 0
+    fail "set needs a value"
+  end
+  let slots = put(cur.prog.slots, name, pack_slot(slot, cur.kind))
+  let bound = with_slots(cur.prog, slots)
+  return take_code(bound, byte(6) ++ u16(slot))
+end
+
+fn emit_if(p: prog, toks: list tok) -> prog
+  let cur = parse_expr(p, toks, 1)
+  if cur.pos != len(toks)
+    fail "extra tokens"
+  end
+  if cur.kind != 1
+    fail "if needs an i64"
+  end
+  let n = cur.prog.seen + 1 else fail "math"
+  let alt = "a" ++ n
+  let done = "d" ++ n
+  let jumped = emit_rel(with_seen(cur.prog, n), 9, alt)
+  let blocks = push(jumped.blocks, block(1, alt, done))
+  return with_blocks(jumped, blocks)
+end
+
+fn emit_while(p: prog, toks: list tok) -> prog
+  let n = p.seen + 1 else fail "math"
+  let head = "h" ++ n
+  let done = "d" ++ n
+  let marked = mark_prog(with_seen(p, n), head)
+  let cur = parse_expr(marked, toks, 1)
+  if cur.pos != len(toks)
+    fail "extra tokens"
+  end
+  if cur.kind != 1
+    fail "while needs an i64"
+  end
+  let jumped = emit_rel(cur.prog, 9, done)
+  let blocks = push(jumped.blocks, block(2, head, done))
+  return with_blocks(jumped, blocks)
+end
+
+fn emit_else(p: prog, toks: list tok) -> prog
+  if len(toks) != 1
+    fail "extra tokens"
+  end
+  if len(p.blocks) == 0
+    fail "else"
+  end
+  let n = len(p.blocks) - 1 else fail "math"
+  let top = at(p.blocks, n) else fail "else"
+  if top.kind != 1
+    fail "else"
+  end
+  let jumped = emit_rel(p, 8, top.done)
+  let marked = mark_prog(jumped, top.alt)
+  let rest = drop_last(marked.blocks)
+  let blocks = push(rest, block(3, top.alt, top.done))
+  return with_blocks(marked, blocks)
+end
+
+fn emit_fail_stmt(p: prog, toks: list tok) -> prog
+  let cur = parse_fail_expr(p, toks, 0)
+  if cur.pos != len(toks)
+    fail "extra tokens"
+  end
+  return cur.prog
+end
+
+fn end_stmt(p: prog) -> prog
+  if len(p.blocks) == 0
+    return close_fn(p)
+  end
+  let n = len(p.blocks) - 1 else fail "math"
+  let top = at(p.blocks, n) else fail "block"
+  let rest = drop_last(p.blocks)
+  if top.kind == 1
+    return with_blocks(mark_prog(p, top.alt), rest)
+  end
+  if top.kind == 3
+    return with_blocks(mark_prog(p, top.done), rest)
+  end
+  if top.kind == 2
+    let jumped = emit_rel(p, 8, top.alt)
+    return with_blocks(mark_prog(jumped, top.done), rest)
+  end
+  fail "block"
+  return p
+end
+
+
+fn on_line(p: prog, text: bytes) -> prog
+  let toks = lex(text)
+  if len(toks) == 0
+    return p
+  end
+  let head = at(toks, 0).text
+  if p.live == 0
+    if eqb(head, "fn")
+      if len(toks) < 2
+        fail "expected a name"
+      end
+      let name = at(toks, 1).text
+      if eqb(name, "main")
+        if len(toks) != 2
+          fail "main takes no parameters"
+        end
+      end
+      return enter_fn(p, name, bind_params(toks))
+    end
+    if eqb(head, "phase")
+      return p
+    end
+    if eqb(head, "gauge")
+      return p
+    end
+    fail "expected fn"
+    return p
+  end
+  if eqb(head, "end")
+    if len(toks) != 1
+      fail "extra tokens"
+    end
+    return end_stmt(p)
+  end
+  if eqb(head, "else")
+    return emit_else(p, toks)
+  end
+  if eqb(head, "return")
+    return emit_return(p, toks)
+  end
+  if eqb(head, "write")
+    return emit_write(p, toks)
+  end
+  if eqb(head, "let")
+    return emit_let(p, toks)
+  end
+  if eqb(head, "set")
+    return emit_set(p, toks)
+  end
+  if eqb(head, "if")
+    return emit_if(p, toks)
+  end
+  if eqb(head, "while")
+    return emit_while(p, toks)
+  end
+  if eqb(head, "fail")
+    return emit_fail_stmt(p, toks)
+  end
+  fail "unsupported statement"
+  return p
+end
+
+fn patch_code(p: prog) -> prog
+  let code = p.code
+  for item in p.jumps
+    if has(p.marks, item.word) == 0
+      fail "missing jump"
+    end
+    let target = get(p.marks, item.word) else fail "missing jump"
+    let rel = target - (item.slot + 4) else fail "math"
+    set code = poke(code, item.slot, rel, 4)
+  end
+  return with_code(p, code)
+end
+
+fn compile(text: bytes) -> prog
+  let fnames: map bytes i64 = map()
+  let arity: map bytes i64 = map()
+  let count = 0
+  for line in lines(text)
+    let toks = lex(line.text)
+    if len(toks) > 0
+      if eqb(at(toks, 0).text, "fn")
+        if len(toks) < 2
+          fail "expected a name"
+        end
+        let name = at(toks, 1).text
+        if has(fnames, name)
+          fail "duplicate function"
+        end
+        let slots = bind_params(toks)
+        set fnames = put(fnames, name, count)
+        set arity = put(arity, name, len(slots))
+        set count = count + 1 else fail "math"
+      end
+    end
+  end
+  if count == 0
+    fail "missing fn"
+  end
+  let p = fresh(fnames, arity)
+  for line in lines(text)
+    set p = on_line(p, line.text)
+  end
+  if p.live != 0
+    fail "unclosed fn"
+  end
+  if p.saw_main == 0
+    fail "missing main"
+  end
+  return patch_code(finish_code(finish_pool(p)))
+end
+
+fn bnew() -> buf
+  let parts: list bytes = list()
+  return buf(parts, "", 0, 0)
+end
+
+fn bflush(b: buf) -> buf
+  if b.fills == 0
+    return b
+  end
+  return buf(push(b.parts, b.part), "", 0, b.count)
+end
+
+fn bpush(b: buf, extra: bytes) -> buf
+  if len(extra) == 0
+    return b
+  end
+  let base = bflush(b)
+  let count = base.count + len(extra) else fail "math"
+  return buf(push(base.parts, extra), "", 0, count)
+end
+
+fn finish_pool(p: prog) -> prog
+  return spawn(p.code, bfinish(p.pbuf), p.nconst, p.strs, p.funcs, p.jumps, p.marks, p.imap, p.bmap, p.smap, p.fnames, p.arity, p.slots, p.unwind, p.main_off, p.main_slots, p.saw_main, p.live, p.start, p.nparams, p.is_main, p.seen, p.cbuf, p.blocks, p.failto, p.pbuf)
+end
+
+fn badd(b: buf, extra: bytes) -> buf
+  if len(extra) == 0
+    return b
+  end
+  let part = b.part ++ extra
+  let fills = b.fills + 1 else fail "math"
+  let count = b.count + len(extra) else fail "math"
+  let next = buf(b.parts, part, fills, count)
+  if fills >= 8
+    return bflush(next)
+  end
+  return next
+end
+
+fn flatten(xs: list bytes) -> bytes
+  if len(xs) == 0
+    return ""
+  end
+  if len(xs) == 1
+    return at(xs, 0) else fail "chunk"
+  end
+  let out: list bytes = list()
+  let i = 0
+  let n = len(xs)
+  while i < n
+    let left = at(xs, i) else fail "chunk"
+    let nxt = i + 1 else fail "math"
+    if nxt < n
+      let right = at(xs, nxt) else fail "chunk"
+      set out = push(out, left ++ right)
+      set i = nxt + 1 else fail "math"
+    end
+    if nxt >= n
+      set out = push(out, left)
+      set i = n
+    end
+  end
+  return flatten(out)
+end
+
+fn bfinish(b: buf) -> bytes
+  let parts = b.parts
+  if b.fills != 0
+    set parts = push(parts, b.part)
+  end
+  return flatten(parts)
+end
+
+fn bwrap(data: bytes) -> buf
+  let parts: list bytes = list()
+  if len(data) == 0
+    return buf(parts, "", 0, 0)
+  end
+  return buf(parts, data, 1, len(data))
+end
+
+fn zeros(n: i64) -> bytes
+  if n <= 0
+    return ""
+  end
+  let chunk = byte(0)
+  let parts: list bytes = list()
+  set parts = push(parts, chunk)
+  let grow = len(chunk) + len(chunk) else fail "math"
+  while grow <= n
+    set chunk = chunk ++ chunk
+    set parts = push(parts, chunk)
+    set grow = len(chunk) + len(chunk) else fail "math"
+  end
+  let out = ""
+  let left = n
+  let i = len(parts) - 1 else fail "math"
+  while i >= 0
+    let piece = at(parts, i) else fail "chunk"
+    if left >= len(piece)
+      set out = out ++ piece
+      set left = left - len(piece) else fail "math"
+    end
+    set i = i - 1 else fail "math"
+  end
+  return out
+end
+
+fn bpad(b: buf, boundary: i64) -> buf
+  let gap = rem(b.count, boundary)
+  if gap == 0
+    return b
+  end
+  let need = boundary - gap else fail "math"
+  return badd(b, zeros(need))
+end
+
+fn rem(n: i64, m: i64) -> i64
+  let q = n / m else fail "math"
+  let r = n - q * m else fail "math"
+  if r < 0
+    return r + m else fail "math"
+  end
+  return r
+end
+
+fn align_up(n: i64, boundary: i64) -> i64
+  let sum = n + boundary - 1 else fail "math"
+  let q = sum / boundary else fail "math"
+  return q * boundary else fail "math"
+end
+
+fn pad_align(data: bytes, boundary: i64) -> bytes
+  let gap = rem(len(data), boundary)
+  if gap == 0
+    return data
+  end
+  let need = boundary - gap else fail "math"
+  return data ++ zeros(need)
+end
+
+fn poke(data: bytes, off: i64, value: i64, nbytes: i64) -> bytes
+  let out = data
+  let v = value
+  let i = 0
+  while i < nbytes
+    set out = set_byte(out, off + i else fail "math", low8(v)) else fail "poke"
+    set v = asr8(v)
+    set i = i + 1 else fail "math"
+  end
+  return out
+end
+
+fn mem_image(p: prog) -> bytes
+  let gap = rem(len(p.code), 8)
+  let padded = p.code
+  if gap != 0
+    set padded = p.code ++ zeros(8 - gap else fail "math")
+  end
+  let pool_off = 256 + len(padded) else fail "math"
+  let funcs_off = pool_off + len(p.pool) else fail "math"
+  let mem = zeros(256) ++ padded ++ p.pool ++ p.funcs
+  set mem = poke(mem, 16, p.main_off, 8)
+  set mem = poke(mem, 24, p.main_slots, 8)
+  set mem = poke(mem, 104, len(p.code), 8)
+  set mem = poke(mem, 208, p.nconst, 8)
+  set mem = poke(mem, 216, 256, 8)
+  set mem = poke(mem, 224, pool_off, 8)
+  set mem = poke(mem, 232, funcs_off, 8)
+  return mem
+end
+
+fn paint(code: bytes, jumps: list fixup, marks: map bytes i64, bias: i64) -> bytes
+  let out = bnew()
+  let i = 0
+  let n = len(code)
+  let j = 0
+  let m = len(jumps)
+  while i < n
+    let slot = -1
+    if j < m
+      set slot = at(jumps, j).slot else fail "jump"
+    end
+    if slot == i
+      let item = at(jumps, j) else fail "jump"
+      if has(marks, item.word) == 0
+        fail "missing label"
+      end
+      let target = get(marks, item.word) else fail "missing label"
+      let rel = target - (bias + i + 4) else fail "math"
+      set out = badd(out, q4(rel))
+      set i = i + 4 else fail "math"
+      set j = j + 1 else fail "math"
+    else
+      let nxt = i + 1 else fail "math"
+      let take = 0
+      if nxt < n
+        if nxt != slot
+          set take = 1
+        end
+      end
+      if take == 1
+        let lo = at(code, i) else fail "byte"
+        let hi = at(code, nxt) else fail "byte"
+        let packed = lo + hi * 256 else fail "math"
+        set out = badd(out, u16(packed))
+        set i = i + 2 else fail "math"
+      else
+        set out = badd(out, byte(at(code, i) else fail "byte"))
+        set i = i + 1 else fail "math"
+      end
+    end
+  end
+  if j != m
+    fail "missing patch"
+  end
+  return bfinish(out)
+end
+
+fn patch_unit(src: unit) -> unit
+  let code = paint(bfinish(src.buf), src.jumps, src.marks, 0)
+  return unit(bwrap(code), src.marks, src.jumps, src.rips)
+end
+
+fn patch_rips(src: unit, symbols: map bytes i64) -> bytes
+  return paint(bfinish(src.buf), src.rips, symbols, 4096)
+end
+
+fn place(data: buf, symbols: map bytes i64, name: bytes, raw: bytes, alignment: i64, data_rva: i64) -> placed
+  let bufv = bpad(data, alignment)
+  let here = bufv.count
+  let symbols2 = put(symbols, name, data_rva + here else fail "math")
+  return placed(badd(bufv, raw), symbols2, here)
+end
+
+fn section(name: bytes, vsize: i64, va: i64, raw_size: i64, raw_ptr: i64, chars: i64) -> bytes
+  let out = zeros(40)
+  let i = 0
+  let n = len(name)
+  while i < n
+    set out = set_byte(out, i, at(name, i) else fail "poke") else fail "poke"
+    set i = i + 1 else fail "math"
+  end
+  set out = poke(out, 8, vsize, 4)
+  set out = poke(out, 12, va, 4)
+  set out = poke(out, 16, raw_size, 4)
+  set out = poke(out, 20, raw_ptr, 4)
+  set out = poke(out, 36, chars, 4)
+  return out
+end
+
+fn dos_header() -> bytes
+  let out = zeros(128)
+  set out = set_byte(out, 0, 77) else fail "poke"
+  set out = set_byte(out, 1, 90) else fail "poke"
+  set out = poke(out, 60, 128, 4)
+  return out
+end
+
+fn coff_header() -> bytes
+  return u16(34404) ++ u16(2) ++ q4(0) ++ q4(0) ++ q4(0) ++ u16(240) ++ u16(35)
+end
+
+fn opt_header(text_raw: i64, data_raw: i64, entry_rva: i64, image_size: i64, import_rva: i64, import_size: i64) -> bytes
+  let opt = zeros(240)
+  set opt = poke(opt, 0, 523, 2)
+  set opt = poke(opt, 4, text_raw, 4)
+  set opt = poke(opt, 8, data_raw, 4)
+  set opt = poke(opt, 16, entry_rva, 4)
+  set opt = poke(opt, 20, 4096, 4)
+  set opt = poke(opt, 24, 5368709120, 8)
+  set opt = poke(opt, 32, 4096, 4)
+  set opt = poke(opt, 36, 512, 4)
+  set opt = poke(opt, 40, 6, 2)
+  set opt = poke(opt, 48, 6, 2)
+  set opt = poke(opt, 56, image_size, 4)
+  set opt = poke(opt, 60, 512, 4)
+  set opt = poke(opt, 68, 3, 2)
+  set opt = poke(opt, 70, 256, 2)
+  set opt = poke(opt, 72, 1048576, 8)
+  set opt = poke(opt, 80, 4096, 8)
+  set opt = poke(opt, 88, 1048576, 8)
+  set opt = poke(opt, 96, 4096, 8)
+  set opt = poke(opt, 108, 16, 4)
+  set opt = poke(opt, 120, import_rva, 4)
+  set opt = poke(opt, 124, import_size, 4)
+  return opt
+end
+
+fn pe_image(code: bytes, data: bytes, entry_rva: i64, data_rva: i64, import_rva: i64, import_size: i64) -> bytes
+  let text_raw = align_up(len(code), 512)
+  let data_raw = align_up(len(data), 512)
+  let image_size = align_up(data_rva + len(data) else fail "math", 4096)
+  let opt = opt_header(text_raw, data_raw, entry_rva, image_size, import_rva, import_size)
+  let data_ptr = 512 + text_raw else fail "math"
+  let text_sec = section(".text", len(code), 4096, text_raw, 512, 1610612768)
+  let data_sec = section(".data", len(data), data_rva, data_raw, data_ptr, 3221225536)
+  let headers = dos_header() ++ byte(80) ++ byte(69) ++ byte(0) ++ byte(0) ++ coff_header() ++ opt ++ text_sec ++ data_sec
+  if len(headers) > 512
+    fail "headers"
+  end
+  let file = headers ++ zeros(512 - len(headers) else fail "math") ++ code ++ zeros(text_raw - len(code) else fail "math") ++ data ++ zeros(data_raw - len(data) else fail "math")
+  return file
+end
+
+fn link_exe(p: prog) -> bytes
+  let mem = mem_image(p)
+  let asm1 = patch_unit(vessel())
+  let data_rva = align_up(4096 + asm1.buf.count else fail "math", 4096)
+  let symbols: map bytes i64 = map()
+  let data = bnew()
+  let s = place(data, symbols, "strs", p.strs, 1, data_rva)
+  set s = place(s.data, s.symbols, "zeroch", "0", 1, data_rva)
+  set s = place(s.data, s.symbols, "mintext", "-9223372036854775808", 1, data_rva)
+  set s = place(s.data, s.symbols, "oommsg", "out of memory\n", 1, data_rva)
+  set s = place(s.data, s.symbols, "depthmsg", "call depth\n", 1, data_rva)
+  set s = place(s.data, s.symbols, "mem", mem, 8, data_rva)
+  let hint0 = byte(0) ++ byte(0)
+  set s = place(s.data, s.symbols, "dllname_kernel32.dll", "kernel32.dll" ++ byte(0), 2, data_rva)
+  set s = place(s.data, s.symbols, "hint_kernel32.dll_GetStdHandle", hint0 ++ "GetStdHandle" ++ byte(0), 2, data_rva)
+  set s = place(s.data, s.symbols, "hint_kernel32.dll_WriteFile", hint0 ++ "WriteFile" ++ byte(0), 2, data_rva)
+  set s = place(s.data, s.symbols, "hint_kernel32.dll_ExitProcess", hint0 ++ "ExitProcess" ++ byte(0), 2, data_rva)
+  set s = place(s.data, s.symbols, "hint_kernel32.dll_VirtualAlloc", hint0 ++ "VirtualAlloc" ++ byte(0), 2, data_rva)
+  set data = bpad(s.data, 8)
+  set symbols = s.symbols
+  let ilt_at = data.count
+  set symbols = put(symbols, "ilt_kernel32.dll", data_rva + ilt_at else fail "math")
+  let h1 = get(symbols, "hint_kernel32.dll_GetStdHandle") else fail "hint"
+  let h2 = get(symbols, "hint_kernel32.dll_WriteFile") else fail "hint"
+  let h3 = get(symbols, "hint_kernel32.dll_ExitProcess") else fail "hint"
+  let h4 = get(symbols, "hint_kernel32.dll_VirtualAlloc") else fail "hint"
+  set data = badd(data, q8(h1))
+  set data = badd(data, q8(h2))
+  set data = badd(data, q8(h3))
+  set data = badd(data, q8(h4))
+  set data = badd(data, q8(0))
+  set data = bpad(data, 8)
+  let iat_at = data.count
+  set symbols = put(symbols, "iat_kernel32.dll", data_rva + iat_at else fail "math")
+  set symbols = put(symbols, "iat_kernel32_GetStdHandle", data_rva + data.count else fail "math")
+  set data = badd(data, q8(h1))
+  set symbols = put(symbols, "iat_kernel32_WriteFile", data_rva + data.count else fail "math")
+  set data = badd(data, q8(h2))
+  set symbols = put(symbols, "iat_kernel32_ExitProcess", data_rva + data.count else fail "math")
+  set data = badd(data, q8(h3))
+  set symbols = put(symbols, "iat_kernel32_VirtualAlloc", data_rva + data.count else fail "math")
+  set data = badd(data, q8(h4))
+  set data = badd(data, q8(0))
+  set data = bpad(data, 4)
+  let import_at = data.count
+  let ilt = get(symbols, "ilt_kernel32.dll") else fail "ilt"
+  let dllr = get(symbols, "dllname_kernel32.dll") else fail "dll"
+  let iat = get(symbols, "iat_kernel32.dll") else fail "iat"
+  set data = badd(data, q4(ilt) ++ q4(0) ++ q4(0) ++ q4(dllr) ++ q4(iat))
+  set data = badd(data, zeros(20))
+  let import_rva = data_rva + import_at else fail "math"
+  let code = patch_rips(asm1, symbols)
+  let entry_off = get(asm1.marks, "start") else fail "missing start"
+  let entry_rva = 4096 + entry_off else fail "math"
+  return pe_image(code, bfinish(data), entry_rva, data_rva, import_rva, 40)
+end
+
+fn main
+  if argc() != 3
+    fail "usage: compiler source out\n"
+  end
+  let src = open(arg(1), 1048576, "cannot open ", "", "file too large\n") else fail reason
+  let image = link_exe(compile(src))
+  let wrote = save(arg(2), image) else fail reason
+end

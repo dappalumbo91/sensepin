@@ -45,6 +45,12 @@ static int success_cases(void) {
     bad += expect_i64("max+0", fold_add(INT64_MAX, 0), 0, INT64_MAX);
     bad += expect_i64("min+0", fold_add(INT64_MIN, 0), 0, INT64_MIN);
     bad += expect_i64("parse min", fold_i64(fold_bytes_view((const uint8_t *)min_text, strlen(min_text))), 0, INT64_MIN);
+    bad += expect_i64("mul", fold_mul(6, 7), 0, 42);
+    bad += expect_i64("mul min", fold_mul(INT64_MIN, -1), 1, 0);
+    bad += expect_i64("mul one", fold_mul(INT64_MIN, 1), 0, INT64_MIN);
+    bad += expect_i64("mul zero", fold_mul(0, INT64_MIN), 0, 0);
+    bad += expect_i64("mul neg", fold_mul(-3, -4), 0, 12);
+    bad += expect_i64("mul max", fold_mul(INT64_MAX, 2), 1, 0);
 
     dec = fold_dec(INT64_MIN);
     if (dec.n != strlen(min_text) || memcmp(dec.p, min_text, dec.n) != 0) {
@@ -63,6 +69,71 @@ static int success_cases(void) {
     if (!opened.failed || opened.reason.n != 7 || memcmp(opened.reason.p, "MISSa\0b", 7) != 0) {
         fprintf(stderr, "nul path was not rejected with the path bytes\n");
         bad += 1;
+    }
+
+    {
+        FoldMap older;
+        FoldMap newer;
+        FoldMap zeros;
+        FoldMap text;
+        FoldMap huge;
+        int64_t key = 1;
+        int64_t first = 10;
+        int64_t second = 20;
+        int64_t got = 0;
+        int64_t one = 1;
+        int64_t two = 2;
+        int64_t three = 3;
+        double pos = 0.0;
+        double neg = -0.0;
+        size_t index = 7;
+        char buf[2] = {'h', 'i'};
+        FoldBytes hi;
+        FoldBytes same;
+        FoldBytes empty_a;
+        FoldBytes empty_b;
+        FoldValue counted;
+        older = fold_map_empty(sizeof key, sizeof first);
+        older = fold_map_put(older, &key, &first, FOLD_KEY_I64);
+        newer = fold_map_put(older, &key, &second, FOLD_KEY_I64);
+        memcpy(&got, older.vals, sizeof got);
+        if (older.count != 1 || got != 10) {
+            fprintf(stderr, "map put changed the earlier map\n");
+            bad += 1;
+        }
+        memcpy(&got, newer.vals, sizeof got);
+        if (newer.count != 1 || got != 20 || !fold_map_find(newer, &key, FOLD_KEY_I64, &index) || index != 0) {
+            fprintf(stderr, "map replace did not keep the first position\n");
+            bad += 1;
+        }
+        zeros = fold_map_empty(sizeof pos, sizeof one);
+        zeros = fold_map_put(zeros, &pos, &one, FOLD_KEY_F64);
+        zeros = fold_map_put(zeros, &neg, &two, FOLD_KEY_F64);
+        memcpy(&got, zeros.vals, sizeof got);
+        if (zeros.count != 1 || got != 2 || fold_map_has(zeros, &pos, FOLD_KEY_F64) != 1) {
+            fprintf(stderr, "map f64 zero keys did not match\n");
+            bad += 1;
+        }
+        hi = fold_bytes_view((const uint8_t *)"hi", 2);
+        same = fold_bytes_view((const uint8_t *)buf, 2);
+        empty_a = fold_bytes_empty();
+        empty_b = fold_bytes_view((const uint8_t *)"", 0);
+        text = fold_map_empty(sizeof hi, sizeof one);
+        text = fold_map_put(text, &hi, &one, FOLD_KEY_BYTES);
+        text = fold_map_put(text, &same, &two, FOLD_KEY_BYTES);
+        text = fold_map_put(text, &empty_a, &three, FOLD_KEY_BYTES);
+        text = fold_map_put(text, &empty_b, &one, FOLD_KEY_BYTES);
+        if (text.count != 2 || fold_map_has(text, &hi, FOLD_KEY_BYTES) != 1) {
+            fprintf(stderr, "map bytes keys did not match by contents\n");
+            bad += 1;
+        }
+        huge = fold_map_empty(sizeof key, sizeof first);
+        huge.count = (size_t)INT64_MAX + 1;
+        counted = fold_map_len(huge);
+        if (!counted.failed) {
+            fprintf(stderr, "map len accepted a count past i64\n");
+            bad += 1;
+        }
     }
     return bad;
 }

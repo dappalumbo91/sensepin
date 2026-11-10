@@ -1,4 +1,4 @@
-"""Score Sensepin v0. The behavior bar for tally is probe 00. The size bar is the host program."""
+"""Score Sensepin. The behavior bar for tally is probe 00. The vessel is the exe plus the shared library."""
 
 from __future__ import annotations
 
@@ -152,6 +152,8 @@ def main() -> None:
         print("\n".join(failures))
         raise SystemExit(1)
 
+    compile_example("grades")
+
     hosts = {}
     probe_json = PROJECT / "results" / "probe-00.json"
     if probe_json.exists():
@@ -166,18 +168,38 @@ def main() -> None:
         "sum": size(EXAMPLES / "sum.sensepin"),
         "bounds": size(EXAMPLES / "bounds.sensepin"),
         "double": size(EXAMPLES / "double.sensepin"),
+        "grades": size(EXAMPLES / "grades.sensepin"),
     }
+    exe_bytes = {
+        "tally": size(BUILD / "tally.exe"),
+        "sum": size(BUILD / "sum.exe"),
+        "bounds": size(BUILD / "bounds.exe"),
+        "double": size(BUILD / "double.exe"),
+        "grades": size(BUILD / "grades.exe"),
+    }
+    library = size(BUILD / "sensepin.dll")
+    surface_tally = 178688
+    surface_grades = 179712
+    surface_two = surface_tally + surface_grades
+    one_tally = exe_bytes["tally"] + library
+    one_grades = exe_bytes["grades"] + library
+    two = exe_bytes["tally"] + exe_bytes["grades"] + library
     payload = {
         "spec_sha256": hashlib.sha256((ROOT / "SPEC.md").read_bytes()).hexdigest(),
         "tally_cases": f"{tally_pass}/{len(tally_cases)}",
         "program_bytes": programs,
         "gauge_bytes": size(ROOT / "runtime.c"),
+        "header_bytes": size(ROOT / "runtime.h"),
         "factory_bytes": size(ROOT / "foldc.py"),
-        "binary_bytes": {
-            "tally": size(BUILD / "tally.exe"),
-            "sum": size(BUILD / "sum.exe"),
-            "bounds": size(BUILD / "bounds.exe"),
-            "double": size(BUILD / "double.exe"),
+        "binary_bytes": exe_bytes,
+        "library_bytes": library,
+        "shipped_one": {"tally": one_tally, "grades": one_grades},
+        "shipped_two": two,
+        "surface_embedded": {
+            "contract": "d100dcf839db",
+            "tally": surface_tally,
+            "grades": surface_grades,
+            "two": surface_two,
         },
         "probe00": {
             name: {
@@ -188,20 +210,63 @@ def main() -> None:
         },
     }
     lines = [
-        "# Sensepin score after gauge bytes",
+        "# Sensepin score after gauge map",
         "",
         f"Contract `{payload['spec_sha256'][:12]}`. Tally behavior {payload['tally_cases']} against probe 00. "
         "double, overflow, sum, and bounds matched their declared bytes.",
         "",
-        "| Program | Residual bytes | Binary |",
+        "| Program | Residual bytes | Exe |",
         "| --- | ---: | ---: |",
     ]
-    for name in ("tally", "sum", "bounds", "double"):
-        lines.append(f"| {name} | {programs[name]} | {payload['binary_bytes'][name]} |")
+    for name in ("tally", "sum", "bounds", "double", "grades"):
+        lines.append(f"| {name} | {programs[name]} | {exe_bytes[name]} |")
     lines.extend(
         [
             "",
-            f"Gauge runtime: {payload['gauge_bytes']} bytes. Compiler factory: {payload['factory_bytes']} bytes.",
+            f"Shared library `sensepin.dll`: {library} bytes. Built with `clang -O2 -shared` and no strip flag.",
+            "",
+            "| Mass | Bytes |",
+            "| --- | ---: |",
+            f"| tally exe + library | {one_tally} |",
+            f"| grades exe + library | {one_grades} |",
+            f"| tally exe + grades exe + library | {two} |",
+            f"| surface tally binary | {surface_tally} |",
+            f"| surface grades binary | {surface_grades} |",
+            f"| surface tally + grades | {surface_two} |",
+            "",
+            f"One shipped tally is the exe plus the library, {one_tally} bytes. "
+            f"One shipped grades is the exe plus the library, {one_grades} bytes. "
+            f"Two shipped programs are the two exes plus the library once, {two} bytes.",
+            "",
+            f"The surface row, contract `d100dcf839db`, embedded the runtime in each binary: "
+            f"tally {surface_tally}, grades {surface_grades}, together {surface_two}.",
+            "",
+        ]
+    )
+    if two < surface_two:
+        lines.append(f"The two-program vessel is smaller by {surface_two - two} bytes.")
+    else:
+        lines.append(
+            f"The two-program vessel is {two} bytes, larger than the surface pair {surface_two} by {two - surface_two} bytes."
+        )
+    one_delta = one_tally - surface_tally
+    if one_delta > 0:
+        one_line = (
+            f"One shipped tally is {one_tally} bytes, larger than the surface tally binary {surface_tally} by {one_delta} bytes. "
+            "The library holds every gauge."
+        )
+    elif one_delta < 0:
+        one_line = (
+            f"One shipped tally is {one_tally} bytes, smaller than the surface tally binary {surface_tally} by {-one_delta} bytes."
+        )
+    else:
+        one_line = f"One shipped tally is {one_tally} bytes, the same mass as the surface tally binary."
+    lines.append(one_line)
+    lines.extend(
+        [
+            "",
+            f"Gauge runtime source: `runtime.c` {payload['gauge_bytes']} bytes, "
+            f"`runtime.h` {payload['header_bytes']} bytes. Compiler factory: {payload['factory_bytes']} bytes.",
             "",
             "Probe 00 host program text, same tally behavior:",
             "",
@@ -215,16 +280,27 @@ def main() -> None:
     lines.extend(
         [
             "",
-            "The tally residual is the behavior file. The file, line, and integer gauges live in the runtime, once, and sum and bounds use that same runtime. Each binary still contains the runtime, because this compiler does not share a library across programs. A smaller residual is a program-text result. The earlier row is results/fold-v0.md, contract 281b6f432322. Grades behavior is scored by probes/01-grades/measure.py.",
+            "The tally residual is the behavior file. The gauge runtime is one shared library, paid once. "
+            "An exe holds that program's residual. One shipped program is the exe plus the library. "
+            "Gauge `map` is in this contract. A byte index other than `for` over bytes stays out. "
+            "The desk command, the Windows installer, and editor diagnostics are in this tree. "
+            "Probe 02 shelf is results/probe-02.md, contract 40947a4db99c. "
+            "The earlier rows are results/fold-v0.md, contract 281b6f432322, "
+            "results/sensepin-rebuild.md, contract 2d4aebf83dec, "
+            "results/sensepin-surface.md, contract d100dcf839db, "
+            "results/sensepin-shared.md, contract c6ecd694d103, and "
+            "results/sensepin-desk.md, contract 803bc794ee66. "
+            "Grades behavior is scored by probes/01-grades/measure.py. This row records the grades exe from the same link.",
             "",
         ]
     )
-    (PROJECT / "results" / "sensepin-rebuild.md").write_text("\n".join(lines), encoding="utf-8")
-    (PROJECT / "results" / "sensepin-rebuild.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    print(PROJECT / "results" / "sensepin-rebuild.md")
+    (PROJECT / "results" / "sensepin-map.md").write_text("\n".join(lines), encoding="utf-8")
+    (PROJECT / "results" / "sensepin-map.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    print(PROJECT / "results" / "sensepin-map.md")
     print(
-        f"tally residual {programs['tally']} binary {payload['binary_bytes']['tally']} "
-        f"gauge {payload['gauge_bytes']}"
+        f"tally residual {programs['tally']} exe {exe_bytes['tally']} "
+        f"library {library} one {one_tally} two {two} "
+        f"grades exe {exe_bytes['grades']} gauge {payload['gauge_bytes']}"
     )
 
 

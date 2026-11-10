@@ -268,6 +268,12 @@ def score_sensepin(cases: list[dict]) -> dict:
     if not row["build_ok"]:
         return row
     row["binary_bytes"] = exe.stat().st_size
+    library = build / "sensepin.dll"
+    row["library_bytes"] = library.stat().st_size if library.exists() else None
+    if row["library_bytes"] is None:
+        row["shipped_bytes"] = None
+    else:
+        row["shipped_bytes"] = row["binary_bytes"] + row["library_bytes"]
     case_rows = []
     for case in cases:
         got = run([str(exe), *case["args"]], PROJECT)
@@ -347,8 +353,11 @@ def write_report(payload: dict) -> None:
     if sense["behavior_ok"]:
         lines.extend(
             [
-                f"Sensepin residual {sense['program_bytes']} bytes, binary {sense['binary_bytes']}, "
-                f"runtime {sense['runtime_bytes']} bytes, behavior {sense['passed']}/{sense['cases']}.",
+                f"Sensepin residual {sense['program_bytes']} bytes, exe {sense['binary_bytes']}, "
+                f"shared library {sense['library_bytes']}, one shipped program {sense['shipped_bytes']}, "
+                f"runtime {sense['runtime_bytes']} bytes, behavior {sense['passed']}/{sense['cases']}. "
+                "The residual file was not edited when `*`, `f64`, lists, structs, `use`, `while`, and a failure returned from a user function were added. "
+                "The gauge runtime is one shared library. One shipped program is the exe plus that library.",
                 "",
             ]
         )
@@ -405,7 +414,8 @@ def main() -> None:
     status = "pass" if sensepin["behavior_ok"] else "fail"
     print(
         f"Sensepin: {status} behavior {sensepin['passed']}/{sensepin['cases']} "
-        f"residual {sensepin['program_bytes']} binary {sensepin['binary_bytes']}"
+        f"residual {sensepin['program_bytes']} exe {sensepin['binary_bytes']} "
+        f"library {sensepin.get('library_bytes')} shipped {sensepin.get('shipped_bytes')}"
     )
     if not all(row["behavior_ok"] for row in payload["hosts"]) or not sensepin["behavior_ok"]:
         raise SystemExit(1)

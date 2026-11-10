@@ -1,0 +1,51 @@
+phase console
+use "twice.sensepin"
+gauge f64
+gauge list
+
+struct point
+  x: i64
+  y: i64
+end
+
+fn parse(text: bytes) -> i64
+  return i64(text) else fail "bad"
+end
+
+fn main
+  let n = twice(21)
+  let half = 1.0 / 2.0
+  let whole = i64(1.9)
+  let xs: list i64 = list()
+  set xs = push(xs, 3)
+  set xs = push(xs, 4)
+  let p = point(at(xs, 0) else 0, at(xs, 1) else 0)
+  let acc = 0
+  for item in xs
+    set acc = acc + item else 0
+  end
+  let left = 3
+  while left
+    set left = left - 1 else 0
+  end
+  let bad = parse("nope") else 5
+  let good = parse("8") else 0
+  write n
+  write " "
+  write half
+  write " "
+  write whole
+  write " "
+  write p.x
+  write " "
+  write p.y
+  write " "
+  write acc
+  write " "
+  write left
+  write " "
+  write bad
+  write " "
+  write good
+  write "\n"
+end

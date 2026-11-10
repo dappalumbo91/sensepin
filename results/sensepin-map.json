@@ -1,0 +1,55 @@
+{
+  "spec_sha256": "25a95a30aaef4391e3c4a1cd0fc740391ba8621675daeeda1fdbbe6cd4e91d7d",
+  "tally_cases": "16/16",
+  "program_bytes": {
+    "tally": 808,
+    "sum": 462,
+    "bounds": 636,
+    "double": 109,
+    "grades": 1576
+  },
+  "gauge_bytes": 20255,
+  "header_bytes": 3697,
+  "factory_bytes": 78581,
+  "binary_bytes": {
+    "tally": 114688,
+    "sum": 113664,
+    "bounds": 113664,
+    "double": 111616,
+    "grades": 115712
+  },
+  "library_bytes": 179712,
+  "shipped_one": {
+    "tally": 294400,
+    "grades": 295424
+  },
+  "shipped_two": 410112,
+  "surface_embedded": {
+    "contract": "d100dcf839db",
+    "tally": 178688,
+    "grades": 179712,
+    "two": 358400
+  },
+  "probe00": {
+    "Python": {
+      "program_bytes": 2816,
+      "binary_bytes": null
+    },
+    "C": {
+      "program_bytes": 4036,
+      "binary_bytes": 160768
+    },
+    "Rust": {
+      "program_bytes": 3082,
+      "binary_bytes": 151040
+    },
+    "Zig": {
+      "program_bytes": 3628,
+      "binary_bytes": 398336
+    },
+    "Go": {
+      "program_bytes": 2200,
+      "binary_bytes": 2668032
+    }
+  }
+}

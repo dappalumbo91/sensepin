@@ -1,0 +1,27 @@
+{
+  "scopeName": "source.sensepin",
+  "name": "Sensepin",
+  "patterns": [
+    { "include": "#string" },
+    { "include": "#number" },
+    { "include": "#keyword" }
+  ],
+  "repository": {
+    "keyword": {
+      "match": "\\b(phase|gauge|fn|end|if|else|for|while|struct|use|return|let|set|fail|in)\\b",
+      "name": "keyword.control.sensepin"
+    },
+    "number": {
+      "match": "\\b[0-9]+(?:\\.[0-9]+)?\\b",
+      "name": "constant.numeric.sensepin"
+    },
+    "string": {
+      "begin": "\"",
+      "end": "\"",
+      "name": "string.quoted.double.sensepin",
+      "patterns": [
+        { "match": "\\\\[\\\\\"n]", "name": "constant.character.escape.sensepin" }
+      ]
+    }
+  }
+}

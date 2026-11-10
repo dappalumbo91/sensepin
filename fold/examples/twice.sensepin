@@ -1,0 +1,6 @@
+phase console
+gauge i64
+
+fn twice(n: i64) -> i64
+  return n * 2 else 0
+end
