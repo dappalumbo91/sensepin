@@ -1,0 +1,10 @@
+phase console
+gauge i64
+
+fn double(n: i64) -> i64
+  return n + n
+end
+
+fn main
+  write double(21) ++ "\n"
+end

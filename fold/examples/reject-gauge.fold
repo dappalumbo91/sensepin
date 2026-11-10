@@ -1,0 +1,5 @@
+phase console
+
+fn main
+  let n = i64("1")
+end

@@ -1,0 +1,40 @@
+{
+  "spec_sha256": "92c16e54ea5628cef68df9afc2d33531e1a7368ef4124f9cd2afdbc116f2490e",
+  "tally_cases": "16/16",
+  "program_bytes": {
+    "tally": 808,
+    "sum": 462,
+    "bounds": 636,
+    "double": 109
+  },
+  "gauge_bytes": 10403,
+  "factory_bytes": 37893,
+  "binary_bytes": {
+    "tally": 178688,
+    "sum": 177664,
+    "bounds": 178176,
+    "double": 146944
+  },
+  "probe00": {
+    "Python": {
+      "program_bytes": 2816,
+      "binary_bytes": null
+    },
+    "C": {
+      "program_bytes": 4036,
+      "binary_bytes": 160768
+    },
+    "Rust": {
+      "program_bytes": 3082,
+      "binary_bytes": 151040
+    },
+    "Zig": {
+      "program_bytes": 3628,
+      "binary_bytes": 398336
+    },
+    "Go": {
+      "program_bytes": 2200,
+      "binary_bytes": 2668032
+    }
+  }
+}

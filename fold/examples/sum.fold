@@ -1,0 +1,19 @@
+phase console
+gauge args
+gauge file
+gauge lines
+gauge i64
+
+fn main
+  if argc() != 2
+    fail "usage: sum <file>"
+  end
+  let path = arg(1)
+  let text = open(path, 1048576, "cannot open ", "empty file", "file too large") else fail reason
+  let sum = 0
+  for line in lines(text)
+    let n = i64(line.text) else fail "bad line " ++ line.n ++ ": " ++ line.text
+    set sum = sum + n else fail "bad line " ++ line.n ++ ": " ++ line.text
+  end
+  write sum ++ "\n"
+end

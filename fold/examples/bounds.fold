@@ -1,0 +1,32 @@
+phase console
+gauge args
+gauge file
+gauge lines
+gauge i64
+
+fn main
+  if argc() != 2
+    fail "usage: bounds <file>"
+  end
+  let path = arg(1)
+  let text = open(path, 1048576, "cannot open ", "empty file", "file too large") else fail reason
+  let low = 0
+  let high = 0
+  let seen = 0
+  for line in lines(text)
+    let n = i64(line.text) else fail "bad line " ++ line.n ++ ": " ++ line.text
+    if seen == 0
+      set low = n
+      set high = n
+      set seen = 1
+    else
+      if n < low
+        set low = n
+      end
+      if n > high
+        set high = n
+      end
+    end
+  end
+  write "min " ++ low ++ "\nmax " ++ high ++ "\n"
+end

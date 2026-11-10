@@ -1,0 +1,10 @@
+results/probe-00-work/
+fold/build/
+**/tally.exe
+**/zig-out/
+**/zig-cache/
+**/.zig-cache/
+**/target/
+__pycache__/
+*.pyc
+*.pdb

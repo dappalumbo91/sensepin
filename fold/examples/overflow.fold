@@ -1,0 +1,7 @@
+phase console
+gauge i64
+
+fn main
+  let n = 9223372036854775807
+  set n = n + 1 else fail "overflow"
+end
