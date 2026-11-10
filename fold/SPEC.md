@@ -1,6 +1,6 @@
 # Sensepin v0
 
-Sensepin is the public name. The working tree keeps the directory `fold/`, the `fold_` prefix, and the source extension `.fold`. povik/fold also uses `.fold`. The extension can change later.
+Sensepin is the public name. Source files use the extension `.sensepin`. The working tree keeps the directory `fold/`, the compiler `foldc.py`, and the `fold_` prefix.
 
 The language in this folder. A program is an index plus a residual. The index is one phase and the gauges the program names. The residual is the functions. The compiler holds the gauge code and lowers the residual to C. Clang builds that C with `-O2` and no strip flag, the same vessel rule as probe 00.
 
@@ -105,4 +105,4 @@ Floats, user structs, modules, multiple files, `*` and `/`, first-class lists, a
 
 ## Vessel
 
-Each program lowers to one C file with the gauge runtime inside it, then `clang -O2`. The binary contains the gauges that program named and the rest of the runtime, because v0 does not share a library across binaries. A smaller residual is a program-text result. It is not yet a smaller vessel. Probe 00 is the behavior bar for `examples/tally.fold`.
+Each program lowers to one C file with the gauge runtime inside it, then `clang -O2`. The binary contains the gauges that program named and the rest of the runtime, because v0 does not share a library across binaries. A smaller residual is a program-text result. It is not yet a smaller vessel. Probe 00 is the behavior bar for `examples/tally.sensepin`.

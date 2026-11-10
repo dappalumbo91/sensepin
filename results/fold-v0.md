@@ -1,6 +1,6 @@
 # Sensepin v0 score
 
-Contract `92c16e54ea56`. Tally behavior 16/16 against probe 00. double, overflow, sum, and bounds matched their declared bytes.
+Contract `281b6f432322`. Tally behavior 16/16 against probe 00. double, overflow, sum, and bounds matched their declared bytes.
 
 | Program | Residual bytes | Binary |
 | --- | ---: | ---: |
@@ -9,7 +9,7 @@ Contract `92c16e54ea56`. Tally behavior 16/16 against probe 00. double, overflow
 | bounds | 636 | 178176 |
 | double | 109 | 146944 |
 
-Gauge runtime: 10403 bytes. Compiler factory: 37893 bytes.
+Gauge runtime: 10403 bytes. Compiler factory: 37896 bytes.
 
 Probe 00 host program text, same tally behavior:
 

@@ -65,4 +65,4 @@ The sense is the behavior named in a probe contract. The forms are Python, C, Ru
 
 The gauge is earned from probes. It is the set of shapes that showed up more than once, with the same behavior, across hosts. Probe 00 put file, line, and integer handling in every host. Sum and bounds reuse those gauges on a different residual. Probe 01 is still the open question for a second parsed field.
 
-The contract is [fold/SPEC.md](fold/SPEC.md). Source files use `.fold`. The working tree keeps the directory `fold/` and the `fold_` prefix.
+The contract is [fold/SPEC.md](fold/SPEC.md). Source files use `.sensepin`. The working tree keeps the directory `fold/` and the `fold_` prefix.

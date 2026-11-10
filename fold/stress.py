@@ -27,7 +27,7 @@ def clang_exe(c_path: Path, exe: Path) -> subprocess.CompletedProcess[bytes]:
 
 
 def compile_fold(name: str, source: str) -> tuple[Path, Path]:
-    fold_path = BUILD / f"{name}.fold"
+    fold_path = BUILD / f"{name}.sensepin"
     c_path = BUILD / f"{name}.c"
     exe = BUILD / f"{name}.exe"
     fold_path.write_text(source, encoding="utf-8")
@@ -166,7 +166,7 @@ def main() -> None:
     else:
         failures.append("large source compiled")
 
-    bad_path = BUILD / "bad.fold"
+    bad_path = BUILD / "bad.sensepin"
     bad_path.write_bytes(b"\xff\xfe")
     bad = run([sys.executable, str(ROOT / "foldc.py"), str(bad_path), "-o", str(BUILD / "bad.c")])
     if bad.returncode == 0 or b"utf-8" not in bad.stderr:

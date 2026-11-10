@@ -2,7 +2,7 @@
 
 Author: Damian Arthur Palumbo. https://github.com/dappalumbo91/sensepin
 
-The desktop folder is Source fold. The language is Sensepin: one sense across many forms, pinned to a law. A program names a phase and the gauges it uses, then writes the residual the law does not rebuild. Source files use `.fold`. The circuit project [povik/fold](https://github.com/povik/fold) uses that same extension. The extension can change later. The working tree keeps the directory `fold/`, the compiler `foldc.py`, and the `fold_` prefix. The license is Apache-2.0, the same license as the other public repositories on this account.
+The desktop folder is Source fold. The language is Sensepin: one sense across many forms, pinned to a law. A program names a phase and the gauges it uses, then writes the residual the law does not rebuild. Source files use `.sensepin`. The working tree keeps the directory `fold/`, the compiler `foldc.py`, and the `fold_` prefix. The license is Apache-2.0, the same license as the other public repositories on this account.
 
 This folder asks why a program takes the space it takes, whether that space can be cut without changing the behavior, and whether a language of our own is the cut that holds. Python, C, Rust, Zig, and Go are the first hosts. Haskell, TypeScript, and Lean are later hosts, because each one measures a different mass.
 

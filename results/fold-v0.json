@@ -1,5 +1,5 @@
 {
-  "spec_sha256": "92c16e54ea5628cef68df9afc2d33531e1a7368ef4124f9cd2afdbc116f2490e",
+  "spec_sha256": "281b6f4323223abc60ae94d0dd4356ec648867c1f511bd7c9cf2c3828f0a76ca",
   "tally_cases": "16/16",
   "program_bytes": {
     "tally": 808,
@@ -8,7 +8,7 @@
     "double": 109
   },
   "gauge_bytes": 10403,
-  "factory_bytes": 37893,
+  "factory_bytes": 37896,
   "binary_bytes": {
     "tally": 178688,
     "sum": 177664,

@@ -1,6 +1,6 @@
 """Sensepin compiler. The contract is SPEC.md. Python is the factory. C is the vessel.
 
-The public name is Sensepin. This file stays foldc.py. Sources stay .fold.
+The public name is Sensepin. This file stays foldc.py. Sources use .sensepin.
 """
 
 from __future__ import annotations

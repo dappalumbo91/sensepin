@@ -55,4 +55,4 @@ Probe 01 is a grade list. Each row is a name and an integer. The program rejects
 
 ## The language
 
-Sensepin started on 2026-11-09, after probe 00 matched on all five hosts. Its contract is [fold/SPEC.md](fold/SPEC.md). A row is kept on a named mass only when [fold/score.py](fold/score.py) shows that mass smaller and the behavior matching. The gauge runtime is reported beside the residual, so a short program file cannot hide the decoder that holds the library. `python fold/stress.py` is the hole pass. The working tree keeps `fold/`, `fold_`, and `.fold`.
+Sensepin started on 2026-11-09, after probe 00 matched on all five hosts. Its contract is [fold/SPEC.md](fold/SPEC.md). A row is kept on a named mass only when [fold/score.py](fold/score.py) shows that mass smaller and the behavior matching. The gauge runtime is reported beside the residual, so a short program file cannot hide the decoder that holds the library. `python fold/stress.py` is the hole pass. The working tree keeps `fold/`, `fold_`, and `.sensepin`.

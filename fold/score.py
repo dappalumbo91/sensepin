@@ -32,7 +32,7 @@ def run(command: list[str]) -> subprocess.CompletedProcess[bytes]:
 
 
 def compile_example(name: str) -> Path:
-    source = EXAMPLES / f"{name}.fold"
+    source = EXAMPLES / f"{name}.sensepin"
     exe = BUILD / f"{name}.exe"
     proc = run(
         [
@@ -88,7 +88,7 @@ def main() -> None:
         [
             sys.executable,
             str(ROOT / "foldc.py"),
-            str(EXAMPLES / "reject-gauge.fold"),
+            str(EXAMPLES / "reject-gauge.sensepin"),
             "-o",
             str(BUILD / "reject.c"),
         ]
@@ -162,10 +162,10 @@ def main() -> None:
         return path.stat().st_size
 
     programs = {
-        "tally": size(EXAMPLES / "tally.fold"),
-        "sum": size(EXAMPLES / "sum.fold"),
-        "bounds": size(EXAMPLES / "bounds.fold"),
-        "double": size(EXAMPLES / "double.fold"),
+        "tally": size(EXAMPLES / "tally.sensepin"),
+        "sum": size(EXAMPLES / "sum.sensepin"),
+        "bounds": size(EXAMPLES / "bounds.sensepin"),
+        "double": size(EXAMPLES / "double.sensepin"),
     }
     payload = {
         "spec_sha256": hashlib.sha256((ROOT / "SPEC.md").read_bytes()).hexdigest(),
