@@ -400,6 +400,14 @@ fn mul_rcx(a: unit) -> unit
   return emit(a, byte(72) ++ byte(247) ++ byte(225))
 end
 
+fn cqo(a: unit) -> unit
+  return emit(a, byte(72) ++ byte(153))
+end
+
+fn idiv_reg(a: unit, dest: i64) -> unit
+  return ff(a, 247, 7, dest)
+end
+
 fn xpush(a: unit, dest: i64) -> unit
   let extra = ""
   let rx = rex_byte(0, 0, dest, 0)
@@ -834,6 +842,16 @@ set a = cmp_reg_imm8(a, 1, 27)
 set a = je(a, "op_field_n")
 set a = cmp_reg_imm8(a, 1, 28)
 set a = je(a, "op_field_text")
+set a = cmp_reg_imm8(a, 1, 16)
+set a = je(a, "op_div")
+set a = cmp_reg_imm8(a, 1, 24)
+set a = je(a, "op_at")
+set a = cmp_reg_imm8(a, 1, 35)
+set a = je(a, "op_before")
+set a = cmp_reg_imm8(a, 1, 36)
+set a = je(a, "op_after")
+set a = cmp_reg_imm8(a, 1, 37)
+set a = je(a, "op_holds")
 set a = jmp_label(a, "stop1")
 set a = label(a, "op_halt")
 set a = mov_reg_mem(a, 0, 5, 176)
@@ -1366,6 +1384,7 @@ set a = jmp_label(a, "dispatch")
 set a = emit_capture(a)
 set a = emit_bytes_ops(a)
 set a = emit_open(a)
+set a = emit_span(a)
 
   return a
 end
@@ -1901,6 +1920,153 @@ fn emit_open(src: unit) -> unit
   return a
 end
 
+fn emit_span(src: unit) -> unit
+  let a = src
+  set a = label(a, "op_div")
+  set a = call_label(a, "pop_cell")
+  set a = mov_reg_mem(a, 12, 3, 8)
+  set a = call_label(a, "pop_cell")
+  set a = mov_reg_mem(a, 0, 3, 8)
+  set a = test_reg(a, 12, 12)
+  set a = jz(a, "fail_empty")
+  set a = mov_reg_imm64(a, 1, -9223372036854775808)
+  set a = cmp_reg(a, 0, 1)
+  set a = jnz(a, "div_ok")
+  set a = mov_reg_imm64(a, 1, -1)
+  set a = cmp_reg(a, 12, 1)
+  set a = je(a, "fail_empty")
+  set a = label(a, "div_ok")
+  set a = cqo(a)
+  set a = idiv_reg(a, 12)
+  set a = call_label(a, "push_i64")
+  set a = jmp_label(a, "dispatch")
+  set a = label(a, "op_at")
+  set a = call_label(a, "pop_cell")
+  set a = mov_reg_mem(a, 0, 3, 0)
+  set a = test_reg(a, 0, 0)
+  set a = jnz(a, "fail_empty")
+  set a = mov_reg_mem(a, 12, 3, 8)
+  set a = call_label(a, "pop_cell")
+  set a = mov_reg_mem(a, 0, 3, 0)
+  set a = cmp_reg_imm8(a, 0, 1)
+  set a = jnz(a, "fail_empty")
+  set a = mov_reg_mem(a, 14, 3, 8)
+  set a = mov_reg_mem(a, 15, 3, 16)
+  set a = cmp_reg_imm8(a, 12, 0)
+  set a = jl(a, "fail_empty")
+  set a = cmp_reg(a, 12, 15)
+  set a = jae(a, "fail_empty")
+  set a = mov_reg_reg(a, 0, 14)
+  set a = add_reg(a, 0, 12)
+  set a = movzx_reg_byte_mem(a, 0, 0, 0)
+  set a = call_label(a, "push_i64")
+  set a = jmp_label(a, "dispatch")
+  set a = label(a, "op_before")
+  set a = mov_reg_imm32(a, 8, 1)
+  set a = jmp_label(a, "span_enter")
+  set a = label(a, "op_after")
+  set a = mov_reg_imm32(a, 8, 2)
+  set a = jmp_label(a, "span_enter")
+  set a = label(a, "op_holds")
+  set a = xor_reg(a, 8, 8)
+  set a = label(a, "span_enter")
+  set a = call_label(a, "pop_cell")
+  set a = mov_reg_mem(a, 0, 3, 0)
+  set a = cmp_reg_imm8(a, 0, 1)
+  set a = jnz(a, "fail_empty")
+  set a = mov_reg_mem(a, 12, 3, 8)
+  set a = mov_reg_mem(a, 13, 3, 16)
+  set a = call_label(a, "pop_cell")
+  set a = mov_reg_mem(a, 0, 3, 0)
+  set a = cmp_reg_imm8(a, 0, 1)
+  set a = jnz(a, "fail_empty")
+  set a = mov_reg_mem(a, 14, 3, 8)
+  set a = mov_reg_mem(a, 15, 3, 16)
+  set a = cmp_reg_imm8(a, 13, 0)
+  set a = jl(a, "fail_empty")
+  set a = cmp_reg_imm8(a, 15, 0)
+  set a = jl(a, "fail_empty")
+  set a = test_reg(a, 13, 13)
+  set a = jz(a, "fail_empty")
+  set a = test_reg(a, 8, 8)
+  set a = jz(a, "holds_go")
+  set a = cmp_reg(a, 13, 15)
+  set a = ja(a, "fail_empty")
+  set a = xor_reg(a, 10, 10)
+  set a = mov_reg_reg(a, 11, 15)
+  set a = sub_reg(a, 11, 13)
+  set a = label(a, "span_scan")
+  set a = cmp_reg(a, 10, 11)
+  set a = ja(a, "fail_empty")
+  set a = call_label(a, "span_match")
+  set a = test_reg(a, 0, 0)
+  set a = jnz(a, "span_hit")
+  set a = inc_reg(a, 10)
+  set a = jmp_label(a, "span_scan")
+  set a = label(a, "span_hit")
+  set a = cmp_reg_imm8(a, 8, 1)
+  set a = jnz(a, "span_after")
+  set a = mov_reg_reg(a, 0, 14)
+  set a = mov_reg_reg(a, 2, 10)
+  set a = call_label(a, "push_bytes")
+  set a = jmp_label(a, "dispatch")
+  set a = label(a, "span_after")
+  set a = mov_reg_reg(a, 0, 14)
+  set a = add_reg(a, 0, 10)
+  set a = add_reg(a, 0, 13)
+  set a = mov_reg_reg(a, 2, 15)
+  set a = sub_reg(a, 2, 10)
+  set a = sub_reg(a, 2, 13)
+  set a = call_label(a, "push_bytes")
+  set a = jmp_label(a, "dispatch")
+  set a = label(a, "holds_go")
+  set a = xor_reg(a, 9, 9)
+  set a = cmp_reg(a, 13, 15)
+  set a = ja(a, "holds_done")
+  set a = xor_reg(a, 10, 10)
+  set a = mov_reg_reg(a, 11, 15)
+  set a = sub_reg(a, 11, 13)
+  set a = label(a, "holds_scan")
+  set a = cmp_reg(a, 10, 11)
+  set a = ja(a, "holds_done")
+  set a = call_label(a, "span_match")
+  set a = test_reg(a, 0, 0)
+  set a = jz(a, "holds_step")
+  set a = inc_reg(a, 9)
+  set a = add_reg(a, 10, 13)
+  set a = jmp_label(a, "holds_scan")
+  set a = label(a, "holds_step")
+  set a = inc_reg(a, 10)
+  set a = jmp_label(a, "holds_scan")
+  set a = label(a, "holds_done")
+  set a = mov_reg_reg(a, 0, 9)
+  set a = call_label(a, "push_i64")
+  set a = jmp_label(a, "dispatch")
+  set a = label(a, "span_match")
+  set a = xor_reg(a, 1, 1)
+  set a = label(a, "match_loop")
+  set a = cmp_reg(a, 1, 13)
+  set a = jae(a, "match_yes")
+  set a = mov_reg_reg(a, 0, 14)
+  set a = add_reg(a, 0, 10)
+  set a = add_reg(a, 0, 1)
+  set a = movzx_reg_byte_mem(a, 0, 0, 0)
+  set a = mov_reg_reg(a, 2, 12)
+  set a = add_reg(a, 2, 1)
+  set a = movzx_reg_byte_mem(a, 2, 2, 0)
+  set a = cmp_reg(a, 0, 2)
+  set a = jnz(a, "match_no")
+  set a = inc_reg(a, 1)
+  set a = jmp_label(a, "match_loop")
+  set a = label(a, "match_yes")
+  set a = mov_reg_imm32(a, 0, 1)
+  set a = ret(a)
+  set a = label(a, "match_no")
+  set a = xor_reg(a, 0, 0)
+  set a = ret(a)
+  return a
+end
+
 fn eqb(left: bytes, right: bytes) -> i64
   let n = len(left)
   if n != len(right)
@@ -2162,7 +2328,12 @@ fn lex(text: bytes) -> list tok
                                           set toks = push(toks, tok(19, 0, ""))
                                           set i = i + 1 else fail "math"
                                         else
-                                          fail "bad character"
+                                          if c == 47
+                                            set toks = push(toks, tok(20, 0, ""))
+                                            set i = i + 1 else fail "math"
+                                          else
+                                            fail "bad character"
+                                          end
                                         end
                                       end
                                     end
@@ -2536,6 +2707,15 @@ fn parse_call(p: prog, toks: list tok, pos: i64) -> parsed
   if eqb(name, "len")
     return parse_len(p, toks, pos)
   end
+  if eqb(name, "before")
+    return parse_pair(p, toks, pos, 35, 2)
+  end
+  if eqb(name, "after")
+    return parse_pair(p, toks, pos, 36, 2)
+  end
+  if eqb(name, "holds")
+    return parse_pair(p, toks, pos, 37, 1)
+  end
   if has(p.fnames, name) == 0
     fail "unknown function"
   end
@@ -2568,8 +2748,46 @@ fn parse_call(p: prog, toks: list tok, pos: i64) -> parsed
   return parsed(failed, i, 1)
 end
 
-fn parse_sum(p: prog, toks: list tok, pos: i64) -> parsed
+fn parse_pair(p: prog, toks: list tok, pos: i64, op: i64, outk: i64) -> parsed
+  if tok_is(toks, pos + 1 else fail "math", 6) == 0
+    fail "expected ("
+  end
+  let a1 = parse_expr(p, toks, pos + 2 else fail "math")
+  if a1.kind != 2
+    fail "type"
+  end
+  if tok_is(toks, a1.pos, 8) == 0
+    fail "expected ,"
+  end
+  let a2 = parse_expr(a1.prog, toks, a1.pos + 1 else fail "math")
+  if a2.kind != 2
+    fail "type"
+  end
+  if tok_is(toks, a2.pos, 7) == 0
+    fail "expected )"
+  end
+  let done = emit_iffail(take_code(a2.prog, byte(op)))
+  return parsed(done, a2.pos + 1 else fail "math", outk)
+end
+
+fn parse_product(p: prog, toks: list tok, pos: i64) -> parsed
   let cur = parse_atom(p, toks, pos)
+  while tok_is(toks, cur.pos, 20)
+    if cur.kind != 1
+      fail "type"
+    end
+    let right = parse_atom(cur.prog, toks, cur.pos + 1 else fail "math")
+    if right.kind != 1
+      fail "type"
+    end
+    let done = emit_iffail(take_code(right.prog, byte(16)))
+    set cur = parsed(done, right.pos, 1)
+  end
+  return cur
+end
+
+fn parse_sum(p: prog, toks: list tok, pos: i64) -> parsed
+  let cur = parse_product(p, toks, pos)
   while tok_is(toks, cur.pos, 4)
     let right = parse_atom(cur.prog, toks, cur.pos + 1 else fail "math")
     let added = emit_add(right.prog)
@@ -2607,7 +2825,25 @@ fn bind_params(toks: list tok) -> map bytes i64
   while i < n
     if at(toks, i).kind == 9
       let name = at(toks, i - 1 else fail "math").text
-      set slots = put(slots, name, slot)
+      let type_at = i + 1 else fail "math"
+      if type_at >= n
+        fail "type"
+      end
+      if at(toks, type_at).kind != 1
+        fail "type"
+      end
+      let type_name = at(toks, type_at).text
+      let sk = 0
+      if eqb(type_name, "i64")
+        set sk = 1
+      end
+      if eqb(type_name, "bytes")
+        set sk = 2
+      end
+      if sk == 0
+        fail "type"
+      end
+      set slots = put(slots, name, pack_slot(slot, sk))
       set slot = slot + 1 else fail "math"
     end
     set i = i + 1 else fail "math"
@@ -2948,8 +3184,88 @@ fn end_stmt(p: prog) -> prog
     let jumped = emit_rel(popped, 8, top.alt)
     return with_blocks(mark_prog(jumped, top.done), rest)
   end
+  if top.kind == 5
+    let tail = after(top.done, "m") else fail "block"
+    let numtext = before(tail, "z") else fail "block"
+    let index_slot = i64(numtext) else fail "block"
+    let pushed = emit_push_slot(p, index_slot)
+    let one = push_i64(pushed, 1)
+    let added = emit_add(one)
+    let popped = emit_pop_slot(added, index_slot)
+    let jumped = emit_rel(popped, 8, top.alt)
+    return with_blocks(mark_prog(jumped, top.done), rest)
+  end
   fail "block"
   return p
+end
+
+fn emit_for_bytes(p: prog, toks: list tok) -> prog
+  if len(toks) < 6
+    fail "expected a name"
+  end
+  if at(toks, 1).kind != 1
+    fail "expected a name"
+  end
+  if at(toks, 2).kind != 1
+    fail "expected in"
+  end
+  if eqb(at(toks, 2).text, "in") == 0
+    fail "expected in"
+  end
+  if at(toks, 3).kind != 1
+    fail "for needs bytes"
+  end
+  if eqb(at(toks, 3).text, "bytes") == 0
+    fail "for needs bytes"
+  end
+  if at(toks, 4).kind != 6
+    fail "expected ("
+  end
+  let name = at(toks, 1).text
+  if has(p.slots, name)
+    fail "already bound"
+  end
+  let cur = parse_expr(p, toks, 5)
+  if cur.kind != 2
+    fail "bytes needs bytes"
+  end
+  if tok_is(toks, cur.pos, 7) == 0
+    fail "expected )"
+  end
+  let endp = cur.pos + 1 else fail "math"
+  if endp != len(toks)
+    fail "extra tokens"
+  end
+  let base = len(cur.prog.slots)
+  let text_slot = base
+  let index_slot = base + 1 else fail "math"
+  let byte_slot = base + 2 else fail "math"
+  let n = cur.prog.seen + 1 else fail "math"
+  let loop = "k" ++ n
+  let body = "b" ++ n
+  let done = "m" ++ index_slot ++ "z" ++ n
+  let slots = cur.prog.slots
+  set slots = put(slots, byte(1) ++ n ++ "t", pack_slot(text_slot, 2))
+  set slots = put(slots, byte(1) ++ n ++ "i", pack_slot(index_slot, 1))
+  set slots = put(slots, name, pack_slot(byte_slot, 1))
+  let bound = with_slots(with_seen(cur.prog, n), slots)
+  let popped = emit_pop_slot(bound, text_slot)
+  let zero = push_i64(popped, 0)
+  let popz = emit_pop_slot(zero, index_slot)
+  let looped = mark_prog(popz, loop)
+  let pushed = emit_push_slot(looped, index_slot)
+  let pushed2 = emit_push_slot(pushed, text_slot)
+  let lengthed = emit_iffail(take_code(pushed2, byte(25)))
+  let cmpd = take_code(lengthed, byte(18) ++ byte(5))
+  let to_body = emit_rel(cmpd, 9, body)
+  let to_done = emit_rel(to_body, 8, done)
+  let at_body = mark_prog(to_done, body)
+  let ptext = emit_push_slot(at_body, text_slot)
+  let pindex = emit_push_slot(ptext, index_slot)
+  let viewed = emit_iffail(take_code(pindex, byte(24)))
+  let popb = emit_pop_slot(viewed, byte_slot)
+  let blocks = push(popb.blocks, block(5, loop, done))
+  return with_blocks(popb, blocks)
 end
 
 fn emit_for(p: prog, toks: list tok) -> prog
@@ -2967,6 +3283,9 @@ fn emit_for(p: prog, toks: list tok) -> prog
   end
   if at(toks, 3).kind != 1
     fail "for needs lines"
+  end
+  if eqb(at(toks, 3).text, "bytes")
+    return emit_for_bytes(p, toks)
   end
   if eqb(at(toks, 3).text, "lines") == 0
     fail "for needs lines"
