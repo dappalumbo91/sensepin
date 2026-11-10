@@ -1,0 +1,77 @@
+{
+  "probe": "01-grades",
+  "contract_sha256": "bd2e38ca5744006ce7325db2be071d98521e9c8145819e2aa7fa73f235515a30",
+  "cases": 25,
+  "hosts": [
+    {
+      "name": "Python",
+      "version": "Python 3.14.4",
+      "build_ok": true,
+      "program_bytes": 3604,
+      "project_bytes": 0,
+      "lock_bytes": 0,
+      "binary_bytes": null,
+      "passed": 25,
+      "cases": 25,
+      "behavior_ok": true,
+      "failures": [],
+      "build_log": ""
+    },
+    {
+      "name": "C",
+      "version": "clang version 22.1.5 (https://github.com/llvm/llvm-project 5ea218a153f4d2f815b8244eab3e4b4ba5e00e6c)",
+      "build_ok": true,
+      "program_bytes": 4950,
+      "project_bytes": 0,
+      "lock_bytes": 0,
+      "binary_bytes": 160768,
+      "passed": 25,
+      "cases": 25,
+      "behavior_ok": true,
+      "failures": [],
+      "build_log": ""
+    },
+    {
+      "name": "Rust",
+      "version": "rustc 1.95.0 (59807616e 2026-04-14)",
+      "build_ok": true,
+      "program_bytes": 3788,
+      "project_bytes": 61,
+      "lock_bytes": 150,
+      "binary_bytes": 151040,
+      "passed": 25,
+      "cases": 25,
+      "behavior_ok": true,
+      "failures": [],
+      "build_log": ""
+    },
+    {
+      "name": "Zig",
+      "version": "0.15.2",
+      "build_ok": true,
+      "program_bytes": 4597,
+      "project_bytes": 437,
+      "lock_bytes": 0,
+      "binary_bytes": 400384,
+      "passed": 25,
+      "cases": 25,
+      "behavior_ok": true,
+      "failures": [],
+      "build_log": ""
+    },
+    {
+      "name": "Go",
+      "version": "go version go1.26.2 windows/amd64",
+      "build_ok": true,
+      "program_bytes": 2895,
+      "project_bytes": 23,
+      "lock_bytes": 0,
+      "binary_bytes": 2669056,
+      "passed": 25,
+      "cases": 25,
+      "behavior_ok": true,
+      "failures": [],
+      "build_log": ""
+    }
+  ]
+}

@@ -18,4 +18,4 @@ Every host matched the contract.
 
 Program text is the behavior file. Project text is the manifest. The binary is the release vessel. Python's interpreter stays off this table because the contract named it as a shared vessel.
 
-This probe is one behavior, written once. It can show the ceremony floor. It cannot show repeated sense. Probe 01 is still unwritten.
+This probe is one behavior, written once. It can show the ceremony floor. It cannot show repeated sense. Probe 01 scores the second behavior.

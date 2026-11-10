@@ -49,9 +49,11 @@ These are unnamed until a probe scores them. They are the list of places the mas
 
 Probe 00 can speak to H1, H4, and H6. It is one behavior, once. It cannot speak to H2. Repetition needs a second copy of the same shape.
 
-## Next contract, not yet a probe
+## Probe 01
 
-Probe 01 is a grade list. Each row is a name and an integer. The program rejects a bad row with the same style of error as probe 00, then prints the count, the integer mean, the min, the max, and the name tied to the max. The new question is how much text the second and third parsed fields cost in each host. Probe 00 is scored. Probe 01 is still unwritten.
+Probe 01 is a grade list. Each row is a name and an integer. The program rejects a bad row with the same style of error as probe 00, then prints the count, the integer mean, the min, the max, and the name tied to the max. The question is how much text the second and third parsed fields cost in each host.
+
+The contract is [probes/01-grades/task.md](probes/01-grades/task.md). The score is [results/probe-01.md](results/probe-01.md), prefix `bd2e38ca5744`. All five hosts matched 25/25. Program text grew by 695 to 969 bytes over each host's tally. Sensepin v0 has no field split and no `/`, so no residual was scored. That miss stays. A new gauge would be its own score.
 
 ## The language
 

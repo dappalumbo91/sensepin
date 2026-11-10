@@ -18,6 +18,8 @@ Probe 00 measured that floor. Sensepin is the language built from it. The compil
 | [METHOD.md](METHOD.md) | How a mass is named, scored, and either kept or left as a miss. |
 | [probes/00-tally/task.md](probes/00-tally/task.md) | The first contract. Written before the score. |
 | [results/probe-00.md](results/probe-00.md) | The score of that contract, once `measure.py` has run. |
+| [probes/01-grades/task.md](probes/01-grades/task.md) | The grade-list contract. A name and an integer on each row. |
+| [results/probe-01.md](results/probe-01.md) | The score of that contract, once its `measure.py` has run. |
 | [fold/SPEC.md](fold/SPEC.md) | The Sensepin language contract. |
 | [results/fold-v0.md](results/fold-v0.md) | The score of the first Sensepin programs, once `fold/score.py` has run. |
 
@@ -25,7 +27,8 @@ Probe 00 measured that floor. Sensepin is the language built from it. The compil
 
 ```text
 python probes/00-tally/measure.py
+python probes/01-grades/measure.py
 python fold/score.py
 ```
 
-The scorer rebuilds every host, runs the same files through them, and writes `results/probe-00.md`. A host that disagrees with the contract is a failed row. The contract is not edited to fit a host.
+Each scorer rebuilds every host, runs the same files through them, and writes that probe's result. A host that disagrees with the contract is a failed row. The contract is not edited to fit a host.
