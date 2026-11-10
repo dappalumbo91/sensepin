@@ -16,7 +16,7 @@ fn <name> ... end
 
 `phase console` is the first declaration. v0 has that one phase. It means a process with binary stdout and stderr, `argc`/`argv`, and exit code 0 when `main` finishes without `fail`.
 
-A gauge line names one library entry. v0 entries are `args`, `file`, `lines`, and `i64`. Using a word from a gauge that was not named is a compile error. Naming a gauge the program does not use is a compile error. The named set is the index.
+A gauge line names one library entry. v0 entries are `args`, `file`, `lines`, `i64`, and `bytes`. Using a word from a gauge that was not named is a compile error. Naming a gauge the program does not use is a compile error. The named set is the index.
 
 `fn main` is required. It has no parameters and no return value. Other functions have typed parameters and one return type. Types are `i64` and `bytes`. A function other than `main` ends with `return`. Calls may recurse. A function returns a value or aborts. It does not hand a failure back to its caller.
 
@@ -38,7 +38,7 @@ Indentation is not significant. A comment starts at `#` outside a string and run
 
 ## Failure
 
-`open`, `arg`, `i64(...)`, `+`, `-`, and unary `-` can fail. A failure carries reason bytes.
+`open`, `arg`, `i64(...)`, `+`, `-`, `/`, unary `-`, `len`, `before`, `after`, and `holds` can fail. A failure carries reason bytes.
 
 `expr else expr` uses the left value when the left succeeds. When the left fails, the right expression runs, and the name `reason` there means those bytes. `reason` is a compile error anywhere else.
 
@@ -55,23 +55,24 @@ return <expr>
 if <expr> ... end
 if <expr> ... else ... end
 for <name> in lines(<expr>) ... end
+for <name> in bytes(<expr>) ... end
 ```
 
 `let` binds a name in the current block. A second `let` of the same name in that block is a compile error. An inner block may shadow. `set` assigns a name bound by `let` in a surrounding block. The loop name and function parameters are not assignable.
 
 `write` and `fail` accept `bytes` or `i64`. `write` adds nothing. `if` runs the then-block when the condition, an `i64`, is not 0.
 
-`for` walks the lines of a `bytes` value. The loop name is a line. `line.text` is `bytes`. `line.n` is the 1-based `i64` line number. A final `\n` does not create another line. One trailing `\r` on a line is removed. `lines("")` walks nothing.
+`for` walks the lines of a `bytes` value, or the bytes of a `bytes` value. Over lines, the loop name is a line. `line.text` is `bytes`. `line.n` is the 1-based `i64` line number. A final `\n` does not create another line. One trailing `\r` on a line is removed. `lines("")` walks nothing. Over bytes, the loop name is an `i64` from 0 through 255, one value per byte, in order. `bytes("")` walks nothing. `lines` and `bytes` are legal only as the expression of `for`.
 
 ## Gauge `i64`
 
-Named with `gauge i64`. It supplies integer literals, `i64(bytes)`, checked `+` and `-`, unary `-`, the comparisons `==` `!=` `<` `>` `<=` `>=`, and decimal rendering.
+Named with `gauge i64`. It supplies integer literals, `i64(bytes)`, checked `+`, `-`, and `/`, unary `-`, the comparisons `==` `!=` `<` `>` `<=` `>=`, and decimal rendering.
 
 An integer literal must fit in `i64`. The source form `-9223372036854775808` is that minimum value.
 
 `i64(bytes)` accepts an optional leading `+` or `-`, then one or more digits `0` through `9`, and nothing else. The value must fit in `i64`. Leading zeros are ordinary digits. Any other byte, including a space or an underscore, fails.
 
-`+`, `-`, and unary `-` fail instead of wrapping. `a - b` when `b` is the minimum `i64` fails, because the negation does not fit. Comparisons return `i64` 1 or 0. Rendering an `i64` with `write`, `fail`, or `++` uses this gauge.
+`+`, `-`, `/`, and unary `-` fail instead of wrapping. `a - b` when `b` is the minimum `i64` fails, because the negation does not fit. `a / b` truncates toward zero. It fails when `b` is 0, and when `a` is the minimum `i64` and `b` is `-1`, because that quotient does not fit. Comparisons return `i64` 1 or 0. Rendering an `i64` with `write`, `fail`, or `++` uses this gauge.
 
 ## Gauge `args`
 
@@ -91,6 +92,12 @@ The size is the byte length, measured as a 64-bit count. Above `limit`, or when 
 
 `lines(bytes)` is the walk defined under Statements. It is legal only as the expression of `for`.
 
+## Gauge `bytes`
+
+Named with `gauge bytes`. It supplies `len(bytes)`, `before(bytes, bytes)`, `after(bytes, bytes)`, `holds(bytes, bytes)`, and the byte walk defined under Statements.
+
+`len` is the byte count as `i64`. A count that does not fit in `i64` fails. `before` is the bytes before the first match of the separator. `after` is the bytes after that match. `holds` is how many non-overlapping matches the text contains. An empty separator fails. A separator that does not occur makes `before` and `after` fail, and `holds` is 0. The pieces are views of the original bytes.
+
 ## Factory limits
 
 Source is UTF-8, at most 1,048,576 bytes, the same ceiling as a probe 00 input. An identifier is an ASCII letter or `_`, then ASCII letters, digits, or `_`, at most 64 characters. A parse deeper than the factory stack is the compile error `source is too deep`.
@@ -101,7 +108,7 @@ The line table for a `for` is released when that loop finishes. File bytes and c
 
 ## What v0 does not include
 
-Floats, user structs, modules, multiple files, `*` and `/`, first-class lists, and a failure returned from a user function. A later gauge is a new named entry with its own score. It is not a silent extra word on these four.
+Floats, user structs, modules, multiple files, `*`, first-class lists, and a failure returned from a user function. Gauge `bytes` and `/` are the words probe 01 showed in every host. A later gauge is a new named entry with its own score.
 
 ## Vessel
 

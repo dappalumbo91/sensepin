@@ -1,0 +1,82 @@
+phase console
+gauge args
+gauge file
+gauge lines
+gauge i64
+gauge bytes
+
+fn name_ok(name: bytes) -> i64
+  let ok = 1
+  if len(name) == 0
+    set ok = 0
+  end
+  for b in bytes(name)
+    let good = 0
+    if b >= 48
+      if b <= 57
+        set good = 1
+      end
+    end
+    if b >= 65
+      if b <= 90
+        set good = 1
+      end
+    end
+    if b >= 97
+      if b <= 122
+        set good = 1
+      end
+    end
+    if b == 95
+      set good = 1
+    end
+    if good == 0
+      set ok = 0
+    end
+  end
+  return ok
+end
+
+fn main
+  if argc() != 2
+    fail "usage: grades <file>"
+  end
+  let path = arg(1)
+  let text = open(path, 1048576, "cannot open ", "empty file", "file too large") else fail reason
+  let count = 0
+  let sum = 0
+  let low = 0
+  let high = 0
+  let seen = 0
+  let max_name = ""
+  for line in lines(text)
+    let bad = "bad line " ++ line.n ++ ": " ++ line.text
+    if holds(line.text, " ") != 1
+      fail bad
+    end
+    let name = before(line.text, " ") else fail bad
+    let rest = after(line.text, " ") else fail bad
+    if name_ok(name) == 0
+      fail bad
+    end
+    let n = i64(rest) else fail bad
+    set sum = sum + n else fail bad
+    if seen == 0
+      set low = n
+      set high = n
+      set max_name = name
+      set seen = 1
+    else
+      if n < low
+        set low = n
+      end
+      if n > high
+        set high = n
+        set max_name = name
+      end
+    end
+    set count = count + 1
+  end
+  let mean = sum / count
+  write "count " ++ count ++ "\nmean " ++ mean ++ "\nmin " ++ low ++ "\nmax " ++ high ++ "\nname " ++ max_name ++ "\n"
+end

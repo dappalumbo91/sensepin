@@ -256,6 +256,18 @@ static FoldValue fold_sub(int64_t a, int64_t b) {
     return fold_add(a, -b);
 }
 
+static FoldValue fold_div(int64_t a, int64_t b) {
+    FoldValue out;
+    memset(&out, 0, sizeof out);
+    out.reason = fold_bytes_empty();
+    if (b == 0 || (a == INT64_MIN && b == -1)) {
+        out.failed = 1;
+        return out;
+    }
+    out.i64 = a / b;
+    return out;
+}
+
 static FoldValue fold_neg(int64_t value) {
     FoldValue out;
     memset(&out, 0, sizeof out);
@@ -368,6 +380,84 @@ static FoldValue fold_open(FoldBytes path, int64_t limit, FoldBytes missing, Fol
     }
     fclose(file);
     out.bytes = fold_bytes_view(buf, (size_t)size);
+    return out;
+}
+
+static int fold_find(FoldBytes text, FoldBytes sep, size_t *at) {
+    size_t i;
+    if (sep.n == 0 || sep.n > text.n) {
+        return 0;
+    }
+    for (i = 0; i <= text.n - sep.n; i++) {
+        if (memcmp(text.p + i, sep.p, sep.n) == 0) {
+            *at = i;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static FoldValue fold_len(FoldBytes text) {
+    FoldValue out;
+    memset(&out, 0, sizeof out);
+    out.reason = fold_bytes_empty();
+    if (text.n > (size_t)INT64_MAX) {
+        out.failed = 1;
+        return out;
+    }
+    out.i64 = (int64_t)text.n;
+    return out;
+}
+
+static FoldValue fold_before(FoldBytes text, FoldBytes sep) {
+    FoldValue out;
+    size_t at = 0;
+    memset(&out, 0, sizeof out);
+    out.reason = fold_bytes_empty();
+    if (!fold_find(text, sep, &at)) {
+        out.failed = 1;
+        return out;
+    }
+    out.bytes = fold_bytes_view(text.p, at);
+    return out;
+}
+
+static FoldValue fold_after(FoldBytes text, FoldBytes sep) {
+    FoldValue out;
+    size_t at = 0;
+    memset(&out, 0, sizeof out);
+    out.reason = fold_bytes_empty();
+    if (!fold_find(text, sep, &at)) {
+        out.failed = 1;
+        return out;
+    }
+    out.bytes = fold_bytes_view(text.p + at + sep.n, text.n - at - sep.n);
+    return out;
+}
+
+static FoldValue fold_holds(FoldBytes text, FoldBytes sep) {
+    FoldValue out;
+    size_t count = 0;
+    size_t i = 0;
+    memset(&out, 0, sizeof out);
+    out.reason = fold_bytes_empty();
+    if (sep.n == 0) {
+        out.failed = 1;
+        return out;
+    }
+    while (i <= text.n && sep.n <= text.n - i) {
+        if (memcmp(text.p + i, sep.p, sep.n) == 0) {
+            count++;
+            i += sep.n;
+        } else {
+            i++;
+        }
+    }
+    if (count > (size_t)INT64_MAX) {
+        out.failed = 1;
+        return out;
+    }
+    out.i64 = (int64_t)count;
     return out;
 }
 

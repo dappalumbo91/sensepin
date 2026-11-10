@@ -31,13 +31,17 @@ KEYWORDS = {
     "return",
     "reason",
 }
-RESERVED = KEYWORDS | {"argc", "arg", "open", "lines", "i64"}
-GAUGES = {"args", "file", "lines", "i64"}
+RESERVED = KEYWORDS | {"argc", "arg", "open", "lines", "i64", "bytes", "len", "before", "after", "holds"}
+GAUGES = {"args", "file", "lines", "i64", "bytes"}
 BUILTIN = {
     "argc": ("args", [], "i64", False),
     "arg": ("args", ["i64"], "bytes", True),
     "open": ("file", ["bytes", "i64", "bytes", "bytes", "bytes"], "bytes", True),
     "i64": ("i64", ["bytes"], "i64", True),
+    "len": ("bytes", ["bytes"], "i64", True),
+    "before": ("bytes", ["bytes", "bytes"], "bytes", True),
+    "after": ("bytes", ["bytes", "bytes"], "bytes", True),
+    "holds": ("bytes", ["bytes", "bytes"], "i64", True),
 }
 
 
@@ -258,7 +262,7 @@ def lex_line(text: str, line: int) -> list[Tok]:
             out.append(Tok(two, two, line))
             i += 2
             continue
-        if ch in "()=+-<>!,.:":
+        if ch in "()=+-<>!,.:/":
             out.append(Tok(ch, ch, line))
             i += 1
             continue
@@ -318,10 +322,17 @@ class ExprParser:
         return left
 
     def sum(self) -> object:
-        left = self.unary()
+        left = self.product()
         while self.peek() is not None and self.peek().kind in {"+", "-"}:
             op = self.take().kind
-            left = Binary(op, left, self.unary(), self.line)
+            left = Binary(op, left, self.product(), self.line)
+        return left
+
+    def product(self) -> object:
+        left = self.unary()
+        while self.peek() is not None and self.peek().kind == "/":
+            self.i += 1
+            left = Binary("/", left, self.unary(), self.line)
         return left
 
     def unary(self) -> object:
@@ -620,13 +631,20 @@ class Checker:
                 self.scopes.pop()
             return
         if isinstance(row, For):
-            if not isinstance(row.expr, Call) or row.expr.name != "lines" or len(row.expr.args) != 1:
-                fail(row.line, "for walks lines(bytes)")
+            if not isinstance(row.expr, Call) or len(row.expr.args) != 1:
+                fail(row.line, "for walks lines(bytes) or bytes(bytes)")
+            if row.expr.name not in {"lines", "bytes"}:
+                fail(row.line, "for walks lines(bytes) or bytes(bytes)")
             arg = self.expr(row.expr.args[0])
             if arg != "bytes":
-                fail(row.line, "lines needs bytes")
-            self.note("lines", row.line)
-            self.scopes.append({row.name: ("line", False)})
+                fail(row.line, f"{row.expr.name} needs bytes")
+            if row.expr.name == "lines":
+                self.note("lines", row.line)
+                bound = ("line", False)
+            else:
+                self.note("bytes", row.line)
+                bound = ("i64", False)
+            self.scopes.append({row.name: bound})
             self.stmts(row.body)
             self.scopes.pop()
             return
@@ -669,6 +687,8 @@ class Checker:
         if isinstance(expr, Call):
             if expr.name == "lines":
                 fail(expr.line, "lines() is only legal in for")
+            if expr.name == "bytes":
+                fail(expr.line, "bytes() is only legal in for")
             if expr.name in BUILTIN:
                 gauge, params, ret, _fails = BUILTIN[expr.name]
                 self.note(gauge, expr.line)
@@ -875,10 +895,20 @@ class Gen:
             return
         if isinstance(row, For):
             src = self.fresh("src")
-            lines = self.fresh("lines")
             index = self.fresh("i")
             self.emit(f"FoldBytes {src} = fold_bytes_empty();")
             self.gen_value(row.expr.args[0], src, "bytes", None)
+            if row.expr.name == "bytes":
+                self.emit(f"for (size_t {index} = 0; {index} < {src}.n; {index}++) {{")
+                cname = self.fresh("v_" + row.name)
+                self.scopes.append({row.name: ("i64", cname, False)})
+                self.emit(f"int64_t {cname} = (int64_t){src}.p[{index}];")
+                self.emit(f"(void){cname};")
+                self.gen_stmts(row.body)
+                self.scopes.pop()
+                self.emit("}")
+                return
+            lines = self.fresh("lines")
             self.emit(f"FoldLines {lines};")
             self.emit(f"fold_lines({src}, &{lines});")
             self.emit(f"for (size_t {index} = 0; {index} < {lines}.count; {index}++) {{")
@@ -956,13 +986,13 @@ class Gen:
             self.side_bytes(expr.right, right, fail)
             self.guard(fail, f"{dest} = fold_cat({left}, {right});")
             return
-        if isinstance(expr, Binary) and expr.op in {"+", "-"}:
+        if isinstance(expr, Binary) and expr.op in {"+", "-", "/"}:
             left = self.fresh("al")
             right = self.fresh("ar")
             self.emit(f"int64_t {left} = 0; int64_t {right} = 0;")
             self.guard_block(fail, lambda: self.gen_value(expr.left, left, "i64", fail))
             self.guard_block(fail, lambda: self.gen_value(expr.right, right, "i64", fail))
-            fn = "fold_add" if expr.op == "+" else "fold_sub"
+            fn = {"+": "fold_add", "-": "fold_sub", "/": "fold_div"}[expr.op]
             self.guard_block(fail, lambda: self.fold_result(f"{fn}({left}, {right})", dest, "i64", fail))
             return
         if isinstance(expr, Binary):

@@ -188,7 +188,7 @@ def main() -> None:
         },
     }
     lines = [
-        "# Sensepin v0 score",
+        "# Sensepin score after gauge bytes",
         "",
         f"Contract `{payload['spec_sha256'][:12]}`. Tally behavior {payload['tally_cases']} against probe 00. "
         "double, overflow, sum, and bounds matched their declared bytes.",
@@ -215,13 +215,13 @@ def main() -> None:
     lines.extend(
         [
             "",
-            "The tally residual is the behavior file. The file, line, and integer gauges live in the runtime, once, and sum and bounds use that same runtime. Each binary still contains the runtime, because v0 does not share a library across programs. A smaller residual is not a smaller vessel.",
+            "The tally residual is the behavior file. The file, line, and integer gauges live in the runtime, once, and sum and bounds use that same runtime. Each binary still contains the runtime, because this compiler does not share a library across programs. A smaller residual is a program-text result. The earlier row is results/fold-v0.md, contract 281b6f432322. Grades behavior is scored by probes/01-grades/measure.py.",
             "",
         ]
     )
-    (PROJECT / "results" / "fold-v0.md").write_text("\n".join(lines), encoding="utf-8")
-    (PROJECT / "results" / "fold-v0.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    print(PROJECT / "results" / "fold-v0.md")
+    (PROJECT / "results" / "sensepin-rebuild.md").write_text("\n".join(lines), encoding="utf-8")
+    (PROJECT / "results" / "sensepin-rebuild.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    print(PROJECT / "results" / "sensepin-rebuild.md")
     print(
         f"tally residual {programs['tally']} binary {payload['binary_bytes']['tally']} "
         f"gauge {payload['gauge_bytes']}"

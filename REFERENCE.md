@@ -63,6 +63,6 @@ Protofluid already maps natural-language form onto one sense and back onto anoth
 
 The sense is the behavior named in a probe contract. The forms are Python, C, Rust, Zig, Go, and whatever host the probe adds later. Sensepin carries the residual: the part a shared gauge cannot rebuild. It lowers to C, so the work is the notation and the gauge.
 
-The gauge is earned from probes. It is the set of shapes that showed up more than once, with the same behavior, across hosts. Probe 00 put file, line, and integer handling in every host. Sum and bounds reuse those gauges on a different residual. Probe 01 put a name and an integer on one line. The five hosts grew by 695 to 969 bytes. Sensepin v0 cannot cut a line into those two fields, and it cannot divide, so that probe has no Sensepin residual.
+The gauge is earned from probes. It is the set of shapes that showed up more than once, with the same behavior, across hosts. Probe 00 put file, line, and integer handling in every host. Sum and bounds reuse those gauges on a different residual. Probe 01 put a name and an integer on one line. The five hosts grew by 695 to 969 bytes. The first Sensepin pass could not cut a line or divide. Gauge `bytes` and `/` then rebuilt that contract: the residual is 1576 bytes and matches the same 25 cases.
 
 The contract is [fold/SPEC.md](fold/SPEC.md). Source files use `.sensepin`. The working tree keeps the directory `fold/` and the `fold_` prefix.

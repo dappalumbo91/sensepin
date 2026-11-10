@@ -143,6 +143,18 @@ def main() -> None:
         "gauge i64",
         failures,
     )
+    expect_error(
+        "bytes call",
+        "phase console\ngauge bytes\nfn main\n  let t = bytes(\"a\")\nend\n",
+        "bytes()",
+        failures,
+    )
+    expect_error(
+        "divide without i64 gauge",
+        "phase console\nfn main\n  write 1 / 1\nend\n",
+        "gauge i64",
+        failures,
+    )
     try:
         foldc.compile_text("phase console\nfn id(n: i64) -> i64\n  return n\nend\nfn main\nend\n")
     except foldc.FoldError as exc:
@@ -337,6 +349,58 @@ end
         file_out = b"a\0b\nLARGE\nEMPTY\nLARGE\nMISS " + directory.encode("utf-8") + b"\nMISS\n1=a;2=b;3=;4=c\r;BLANK1"
         check("files", proc, 0, file_out, b"", failures)
         huge.unlink(missing_ok=True)
+
+    _, cut_exe = compile_fold(
+        "cut",
+        """phase console
+gauge i64
+gauge bytes
+fn main
+  write (10 / 2)
+  write " "
+  write (0 - 5) / 2
+  write " "
+  write (0 - 1) / 2
+  write " "
+  let z = 1 / 0 else 7
+  write z
+  write " "
+  let edge = -9223372036854775808 / -1 else 9
+  write edge
+  write " "
+  write len("ab")
+  write " "
+  write before("ada 10", " ")
+  write " "
+  write after("ada 10", " ")
+  write " "
+  write holds("a  b", " ")
+  write " "
+  let miss = before("ab", " ") else "NO"
+  write miss
+  write " "
+  let badsep = holds("ab", "") else 4
+  write badsep
+  write " "
+  let ok = 1
+  for b in bytes("A_z")
+    if b < 48
+      set ok = 0
+    end
+  end
+  write ok
+  write "\\n"
+end
+""",
+    )
+    check(
+        "cut",
+        run([str(cut_exe)]),
+        0,
+        b"5 -2 0 7 9 2 ada 10 2 NO 4 1\n",
+        b"",
+        failures,
+    )
 
     unit_c = ROOT / "stress_runtime.c"
     unit_exe = BUILD / "stress_runtime.exe"

@@ -53,7 +53,7 @@ Probe 00 can speak to H1, H4, and H6. It is one behavior, once. It cannot speak 
 
 Probe 01 is a grade list. Each row is a name and an integer. The program rejects a bad row with the same style of error as probe 00, then prints the count, the integer mean, the min, the max, and the name tied to the max. The question is how much text the second and third parsed fields cost in each host.
 
-The contract is [probes/01-grades/task.md](probes/01-grades/task.md). The score is [results/probe-01.md](results/probe-01.md), prefix `bd2e38ca5744`. All five hosts matched 25/25. Program text grew by 695 to 969 bytes over each host's tally. Sensepin v0 has no field split and no `/`, so no residual was scored. That miss stays. A new gauge would be its own score.
+The contract is [probes/01-grades/task.md](probes/01-grades/task.md). The score is [results/probe-01.md](results/probe-01.md), prefix `bd2e38ca5744`. All five hosts matched 25/25. Program text grew by 695 to 969 bytes over each host's tally. The first Sensepin pass had no residual. Gauge `bytes` and `/` were added after that miss, and `fold/examples/grades.sensepin` then matched the same 25 cases in 1576 bytes. The host contract was not edited.
 
 ## The language
 

@@ -73,5 +73,15 @@
       "failures": [],
       "build_log": ""
     }
-  ]
+  ],
+  "sensepin": {
+    "program_bytes": 1576,
+    "runtime_bytes": 12537,
+    "binary_bytes": 179712,
+    "build_ok": true,
+    "passed": 25,
+    "cases": 25,
+    "behavior_ok": true,
+    "failures": []
+  }
 }

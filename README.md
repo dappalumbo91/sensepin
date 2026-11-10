@@ -21,7 +21,8 @@ Probe 00 measured that floor. Sensepin is the language built from it. The compil
 | [probes/01-grades/task.md](probes/01-grades/task.md) | The grade-list contract. A name and an integer on each row. |
 | [results/probe-01.md](results/probe-01.md) | The score of that contract, once its `measure.py` has run. |
 | [fold/SPEC.md](fold/SPEC.md) | The Sensepin language contract. |
-| [results/fold-v0.md](results/fold-v0.md) | The score of the first Sensepin programs, once `fold/score.py` has run. |
+| [results/fold-v0.md](results/fold-v0.md) | The first Sensepin score, contract `281b6f432322`. Left as it was scored. |
+| [results/sensepin-rebuild.md](results/sensepin-rebuild.md) | Tally scored again after gauge `bytes` and `/`. |
 
 ## First command
 

@@ -20,4 +20,6 @@ The delta column is grades program text minus the probe 00 tally program text fo
 
 File, line split, the integer rule, and the bad-line message are the ceremony probe 00 already paid for. They show up again here. The delta is what the new fields add on top of that copy.
 
-Sensepin v0 is not a host row. A line is one `bytes` value, `i64` parses a whole integer, and the language has no split and no `/`. No residual was scored. A word that would cut a field out of a line, or a word that would divide, would be a new gauge entry with its own score. This contract stays as it was written.
+Sensepin's first pass at this contract had no residual. v0 could not cut a line, and it could not divide. The rebuild adds gauge `bytes` (`len`, `before`, `after`, `holds`, and a byte walk) and checked `/` on gauge `i64`. The host table above is the same contract.
+
+Sensepin residual 1576 bytes, binary 179712, runtime 12537 bytes, behavior 25/25.

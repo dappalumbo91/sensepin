@@ -237,6 +237,59 @@ def earlier_program_bytes() -> dict[str, int]:
     return {row["name"]: row["program_bytes"] for row in payload["hosts"]}
 
 
+def score_sensepin(cases: list[dict]) -> dict:
+    source = PROJECT / "fold" / "examples" / "grades.sensepin"
+    build = PROJECT / "fold" / "build"
+    build.mkdir(parents=True, exist_ok=True)
+    exe = build / "grades.exe"
+    proc = run(
+        [
+            sys.executable,
+            str(PROJECT / "fold" / "foldc.py"),
+            str(source),
+            "-o",
+            str(build / "grades.c"),
+            "--exe",
+            str(exe),
+        ],
+        PROJECT,
+    )
+    row = {
+        "program_bytes": source.stat().st_size if source.exists() else 0,
+        "runtime_bytes": (PROJECT / "fold" / "runtime.c").stat().st_size,
+        "binary_bytes": None,
+        "build_ok": proc.returncode == 0,
+        "build_log": (proc.stdout + proc.stderr).decode("utf-8", errors="replace")[-2000:],
+        "passed": 0,
+        "cases": 0,
+        "behavior_ok": False,
+        "failures": [],
+    }
+    if not row["build_ok"]:
+        return row
+    row["binary_bytes"] = exe.stat().st_size
+    case_rows = []
+    for case in cases:
+        got = run([str(exe), *case["args"]], PROJECT)
+        expect = case["expect"]
+        ok = got.returncode == expect["code"] and got.stdout == expect["out"] and got.stderr == expect["err"]
+        case_rows.append(
+            {
+                "name": case["name"],
+                "ok": ok,
+                "code": got.returncode,
+                "stdout": show(got.stdout),
+                "stderr": show(got.stderr),
+            }
+        )
+    passed = sum(1 for item in case_rows if item["ok"])
+    row["passed"] = passed
+    row["cases"] = len(case_rows)
+    row["behavior_ok"] = passed == len(case_rows)
+    row["failures"] = [item for item in case_rows if not item["ok"]]
+    return row
+
+
 def write_report(payload: dict) -> None:
     lines = [
         "# Probe 01 score",
@@ -286,10 +339,29 @@ def write_report(payload: dict) -> None:
             "",
             "File, line split, the integer rule, and the bad-line message are the ceremony probe 00 already paid for. They show up again here. The delta is what the new fields add on top of that copy.",
             "",
-            "Sensepin v0 is not a host row. A line is one `bytes` value, `i64` parses a whole integer, and the language has no split and no `/`. No residual was scored. A word that would cut a field out of a line, or a word that would divide, would be a new gauge entry with its own score. This contract stays as it was written.",
+            "Sensepin's first pass at this contract had no residual. v0 could not cut a line, and it could not divide. The rebuild adds gauge `bytes` (`len`, `before`, `after`, `holds`, and a byte walk) and checked `/` on gauge `i64`. The host table above is the same contract.",
             "",
         ]
     )
+    sense = payload["sensepin"]
+    if sense["behavior_ok"]:
+        lines.extend(
+            [
+                f"Sensepin residual {sense['program_bytes']} bytes, binary {sense['binary_bytes']}, "
+                f"runtime {sense['runtime_bytes']} bytes, behavior {sense['passed']}/{sense['cases']}.",
+                "",
+            ]
+        )
+    else:
+        lines.append("Sensepin did not rebuild the contract.")
+        lines.append("")
+        if not sense["build_ok"]:
+            lines.extend(["```text", sense["build_log"].strip() or "no compiler output", "```", ""])
+        for failure in sense["failures"]:
+            lines.append(
+                f"- Sensepin `{failure['name']}` exited {failure['code']}. stdout `{failure['stdout']!r}` stderr `{failure['stderr']!r}`."
+            )
+        lines.append("")
     OUT_MD.write_text("\n".join(lines), encoding="utf-8")
     stored = {
         "probe": payload["probe"],
@@ -300,6 +372,11 @@ def write_report(payload: dict) -> None:
             | {"build_log": row["build_log"] if not row["behavior_ok"] else ""}
             for row in payload["hosts"]
         ],
+        "sensepin": {
+            key: payload["sensepin"][key]
+            for key in payload["sensepin"]
+            if key != "build_log" or not payload["sensepin"]["behavior_ok"]
+        },
     }
     OUT_JSON.write_text(json.dumps(stored, indent=2), encoding="utf-8")
 
@@ -308,11 +385,13 @@ def main() -> None:
     WORK.mkdir(parents=True, exist_ok=True)
     contract = (ROOT / "task.md").read_bytes()
     cases = build_cases()
+    sensepin = score_sensepin(cases)
     payload = {
         "probe": "01-grades",
         "contract_sha256": hashlib.sha256(contract).hexdigest(),
         "cases": len(cases),
         "hosts": [score_host(host, cases) for host in hosts()],
+        "sensepin": sensepin,
     }
     write_report(payload)
     print(OUT_MD)
@@ -323,7 +402,12 @@ def main() -> None:
             f"program {row['program_bytes']} project {row['project_bytes']} "
             f"binary {row['binary_bytes']}"
         )
-    if not all(row["behavior_ok"] for row in payload["hosts"]):
+    status = "pass" if sensepin["behavior_ok"] else "fail"
+    print(
+        f"Sensepin: {status} behavior {sensepin['passed']}/{sensepin['cases']} "
+        f"residual {sensepin['program_bytes']} binary {sensepin['binary_bytes']}"
+    )
+    if not all(row["behavior_ok"] for row in payload["hosts"]) or not sensepin["behavior_ok"]:
         raise SystemExit(1)
 
 
