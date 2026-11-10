@@ -348,6 +348,10 @@ fn add_reg_imm8(a: unit, dest: i64, n: i64) -> unit
   return reg_imm(a, 131, 0, dest, n, 1)
 end
 
+fn sub_reg_imm8(a: unit, dest: i64, n: i64) -> unit
+  return reg_imm(a, 131, 5, dest, n, 1)
+end
+
 fn add_reg_imm32(a: unit, dest: i64, n: i64) -> unit
   return reg_imm(a, 129, 0, dest, n, 4)
 end
@@ -368,6 +372,10 @@ fn shl_reg_imm8(a: unit, dest: i64, n: i64) -> unit
   return reg_imm(a, 193, 4, dest, n, 1)
 end
 
+fn shr_reg_imm8(a: unit, dest: i64, n: i64) -> unit
+  return reg_imm(a, 193, 5, dest, n, 1)
+end
+
 fn ff(a: unit, opcode: i64, ext: i64, dest: i64) -> unit
   return emit(a, rex_prefix(1, 0, dest) ++ byte(opcode) ++ byte(modrm(3, ext, dest)))
 end
@@ -386,6 +394,10 @@ end
 
 fn udiv_reg(a: unit, dest: i64) -> unit
   return ff(a, 247, 6, dest)
+end
+
+fn mul_rcx(a: unit) -> unit
+  return emit(a, byte(72) ++ byte(247) ++ byte(225))
 end
 
 fn xpush(a: unit, dest: i64) -> unit
@@ -502,6 +514,18 @@ fn jo(a: unit, name: bytes) -> unit
   return jcc(a, 0, name)
 end
 
+fn jl(a: unit, name: bytes) -> unit
+  return jcc(a, 12, name)
+end
+
+fn jg(a: unit, name: bytes) -> unit
+  return jcc(a, 15, name)
+end
+
+fn jbe(a: unit, name: bytes) -> unit
+  return jcc(a, 6, name)
+end
+
 fn align_size(src: unit, dest: i64) -> unit
   let a = src
   set a = xor_reg(a, 1, 1)
@@ -591,6 +615,10 @@ set a = call_rip(a, "iat_kernel32_VirtualAlloc")
 set a = test_reg(a, 0, 0)
 set a = jz(a, "oom")
 set a = mov_mem_reg(a, 5, 112, 0)
+set a = xor_reg(a, 0, 0)
+set a = mov_mem_reg(a, 5, 248, 0)
+set a = mov_mem_reg(a, 5, 256, 0)
+set a = call_label(a, "capture_args")
 set a = jmp_label(a, "dispatch")
 set a = label(a, "write_out")
 set a = test_reg(a, 8, 8)
@@ -790,6 +818,22 @@ set a = cmp_reg_imm8(a, 1, 12)
 set a = je(a, "op_clear")
 set a = cmp_reg_imm8(a, 1, 18)
 set a = je(a, "op_cmp")
+set a = cmp_reg_imm8(a, 1, 20)
+set a = je(a, "op_i64")
+set a = cmp_reg_imm8(a, 1, 21)
+set a = je(a, "op_argc")
+set a = cmp_reg_imm8(a, 1, 22)
+set a = je(a, "op_arg")
+set a = cmp_reg_imm8(a, 1, 23)
+set a = je(a, "op_open")
+set a = cmp_reg_imm8(a, 1, 25)
+set a = je(a, "op_len")
+set a = cmp_reg_imm8(a, 1, 26)
+set a = je(a, "op_line")
+set a = cmp_reg_imm8(a, 1, 27)
+set a = je(a, "op_field_n")
+set a = cmp_reg_imm8(a, 1, 28)
+set a = je(a, "op_field_text")
 set a = jmp_label(a, "stop1")
 set a = label(a, "op_halt")
 set a = mov_reg_mem(a, 0, 5, 176)
@@ -1055,12 +1099,19 @@ set a = mov_reg_mem(a, 0, 5, 192)
 set a = mov_reg_mem(a, 2, 5, 184)
 set a = label(a, "cat_publish")
 set a = mov_reg_mem(a, 1, 5, 200)
+set a = cmp_reg_imm8(a, 1, 1)
+set a = je(a, "cat_as_reason")
 set a = test_reg(a, 1, 1)
 set a = jz(a, "cat_push")
 set a = mov_mem_imm32(a, 1, 0, 1)
 set a = mov_mem_reg(a, 1, 8, 0)
 set a = mov_mem_reg(a, 1, 16, 2)
 set a = mov_mem_imm32(a, 1, 24, 0)
+set a = jmp_label(a, "dispatch")
+set a = label(a, "cat_as_reason")
+set a = mov_mem_imm32(a, 5, 48, 1)
+set a = mov_mem_reg(a, 5, 56, 0)
+set a = mov_mem_reg(a, 5, 64, 2)
 set a = jmp_label(a, "dispatch")
 set a = label(a, "cat_push")
 set a = call_label(a, "push_bytes")
@@ -1312,7 +1363,541 @@ set a = label(a, "cmp_push")
 set a = mov_reg_reg(a, 0, 1)
 set a = call_label(a, "push_i64")
 set a = jmp_label(a, "dispatch")
+set a = emit_capture(a)
+set a = emit_bytes_ops(a)
+set a = emit_open(a)
 
+  return a
+end
+
+fn emit_capture(src: unit) -> unit
+  let a = src
+  set a = label(a, "capture_args")
+  set a = sub_rsp_imm32(a, 32)
+  set a = call_rip(a, "iat_kernel32_GetCommandLineA")
+  set a = add_rsp_imm32(a, 32)
+  set a = test_reg(a, 0, 0)
+  set a = jz(a, "stop1")
+  set a = mov_mem_reg(a, 5, 264, 0)
+  set a = mov_reg_reg(a, 12, 0)
+  set a = xor_reg(a, 13, 13)
+  set a = label(a, "cap_skip")
+  set a = mov_reg_reg(a, 0, 12)
+  set a = movzx_reg_byte_mem(a, 0, 0, 0)
+  set a = cmp_reg_imm8(a, 0, 0)
+  set a = je(a, "cap_counted")
+  set a = cmp_reg_imm8(a, 0, 32)
+  set a = je(a, "cap_adv")
+  set a = cmp_reg_imm8(a, 0, 9)
+  set a = je(a, "cap_adv")
+  set a = inc_reg(a, 13)
+  set a = call_label(a, "skip_arg")
+  set a = jmp_label(a, "cap_skip")
+  set a = label(a, "cap_adv")
+  set a = inc_reg(a, 12)
+  set a = jmp_label(a, "cap_skip")
+  set a = label(a, "cap_counted")
+  set a = mov_mem_reg(a, 5, 248, 13)
+  set a = mov_reg_reg(a, 1, 13)
+  set a = shl_reg_imm8(a, 1, 4)
+  set a = call_label(a, "alloc")
+  set a = mov_mem_reg(a, 5, 256, 0)
+  set a = mov_reg_reg(a, 14, 0)
+  set a = mov_reg_mem(a, 12, 5, 264)
+  set a = xor_reg(a, 15, 15)
+  set a = label(a, "cap_fill")
+  set a = mov_reg_mem(a, 0, 5, 248)
+  set a = cmp_reg(a, 15, 0)
+  set a = jae(a, "cap_done")
+  set a = mov_reg_reg(a, 0, 12)
+  set a = movzx_reg_byte_mem(a, 0, 0, 0)
+  set a = cmp_reg_imm8(a, 0, 0)
+  set a = je(a, "cap_done")
+  set a = cmp_reg_imm8(a, 0, 32)
+  set a = je(a, "cap_fill_adv")
+  set a = cmp_reg_imm8(a, 0, 9)
+  set a = je(a, "cap_fill_adv")
+  set a = call_label(a, "copy_arg")
+  set a = inc_reg(a, 15)
+  set a = jmp_label(a, "cap_fill")
+  set a = label(a, "cap_fill_adv")
+  set a = inc_reg(a, 12)
+  set a = jmp_label(a, "cap_fill")
+  set a = label(a, "cap_done")
+  set a = ret(a)
+  set a = label(a, "skip_arg")
+  set a = label(a, "skip_loop")
+  set a = mov_reg_reg(a, 0, 12)
+  set a = movzx_reg_byte_mem(a, 0, 0, 0)
+  set a = cmp_reg_imm8(a, 0, 0)
+  set a = je(a, "skip_ret")
+  set a = cmp_reg_imm8(a, 0, 32)
+  set a = je(a, "skip_ret")
+  set a = cmp_reg_imm8(a, 0, 9)
+  set a = je(a, "skip_ret")
+  set a = cmp_reg_imm8(a, 0, 34)
+  set a = je(a, "skip_quote")
+  set a = inc_reg(a, 12)
+  set a = jmp_label(a, "skip_loop")
+  set a = label(a, "skip_quote")
+  set a = inc_reg(a, 12)
+  set a = label(a, "skip_q")
+  set a = mov_reg_reg(a, 0, 12)
+  set a = movzx_reg_byte_mem(a, 0, 0, 0)
+  set a = cmp_reg_imm8(a, 0, 0)
+  set a = je(a, "skip_loop")
+  set a = cmp_reg_imm8(a, 0, 34)
+  set a = je(a, "skip_qend")
+  set a = inc_reg(a, 12)
+  set a = jmp_label(a, "skip_q")
+  set a = label(a, "skip_qend")
+  set a = inc_reg(a, 12)
+  set a = jmp_label(a, "skip_loop")
+  set a = label(a, "skip_ret")
+  set a = ret(a)
+  set a = label(a, "copy_arg")
+  set a = mov_reg_reg(a, 11, 12)
+  set a = xor_reg(a, 10, 10)
+  set a = label(a, "copy_len")
+  set a = mov_reg_reg(a, 0, 11)
+  set a = movzx_reg_byte_mem(a, 0, 0, 0)
+  set a = cmp_reg_imm8(a, 0, 0)
+  set a = je(a, "copy_alloc")
+  set a = cmp_reg_imm8(a, 0, 32)
+  set a = je(a, "copy_alloc")
+  set a = cmp_reg_imm8(a, 0, 9)
+  set a = je(a, "copy_alloc")
+  set a = cmp_reg_imm8(a, 0, 34)
+  set a = je(a, "copy_len_q")
+  set a = inc_reg(a, 10)
+  set a = inc_reg(a, 11)
+  set a = jmp_label(a, "copy_len")
+  set a = label(a, "copy_len_q")
+  set a = inc_reg(a, 11)
+  set a = label(a, "copy_len_qloop")
+  set a = mov_reg_reg(a, 0, 11)
+  set a = movzx_reg_byte_mem(a, 0, 0, 0)
+  set a = cmp_reg_imm8(a, 0, 0)
+  set a = je(a, "copy_len")
+  set a = cmp_reg_imm8(a, 0, 34)
+  set a = je(a, "copy_len_qend")
+  set a = inc_reg(a, 10)
+  set a = inc_reg(a, 11)
+  set a = jmp_label(a, "copy_len_qloop")
+  set a = label(a, "copy_len_qend")
+  set a = inc_reg(a, 11)
+  set a = jmp_label(a, "copy_len")
+  set a = label(a, "copy_alloc")
+  set a = mov_mem_reg(a, 5, 272, 10)
+  set a = mov_mem_reg(a, 5, 280, 11)
+  set a = mov_reg_reg(a, 1, 10)
+  set a = call_label(a, "alloc")
+  set a = mov_reg_reg(a, 8, 0)
+  set a = mov_reg_reg(a, 9, 0)
+  set a = label(a, "copy_bytes")
+  set a = mov_reg_mem(a, 0, 5, 280)
+  set a = cmp_reg(a, 12, 0)
+  set a = jae(a, "copy_store")
+  set a = mov_reg_reg(a, 0, 12)
+  set a = movzx_reg_byte_mem(a, 0, 0, 0)
+  set a = cmp_reg_imm8(a, 0, 34)
+  set a = je(a, "copy_skip_quote")
+  set a = mov_mem8_reg(a, 8, 0, 0)
+  set a = inc_reg(a, 8)
+  set a = inc_reg(a, 12)
+  set a = jmp_label(a, "copy_bytes")
+  set a = label(a, "copy_skip_quote")
+  set a = inc_reg(a, 12)
+  set a = jmp_label(a, "copy_bytes")
+  set a = label(a, "copy_store")
+  set a = mov_reg_reg(a, 0, 9)
+  set a = mov_reg_mem(a, 2, 5, 272)
+  set a = mov_mem_reg(a, 14, 0, 0)
+  set a = mov_mem_reg(a, 14, 8, 2)
+  set a = add_reg_imm8(a, 14, 16)
+  set a = ret(a)
+  return a
+end
+
+fn emit_bytes_ops(src: unit) -> unit
+  let a = src
+  set a = label(a, "push_line")
+  set a = mov_reg_reg(a, 11, 8)
+  set a = mov_reg_reg(a, 9, 0)
+  set a = mov_mem_reg(a, 5, 184, 2)
+  set a = mov_reg_mem(a, 1, 5, 24)
+  set a = shl_reg_imm8(a, 1, 5)
+  set a = mov_reg_mem(a, 2, 5, 88)
+  set a = add_reg(a, 1, 2)
+  set a = mov_mem_imm32(a, 1, 0, 2)
+  set a = mov_mem_reg(a, 1, 8, 9)
+  set a = mov_reg_mem(a, 8, 5, 184)
+  set a = mov_mem_reg(a, 1, 16, 8)
+  set a = mov_mem_reg(a, 1, 24, 11)
+  set a = inc_mem(a, 5, 24)
+  set a = ret(a)
+  set a = label(a, "op_argc")
+  set a = mov_reg_mem(a, 0, 5, 248)
+  set a = call_label(a, "push_i64")
+  set a = jmp_label(a, "dispatch")
+  set a = label(a, "op_arg")
+  set a = call_label(a, "pop_cell")
+  set a = mov_reg_mem(a, 0, 3, 8)
+  set a = cmp_reg_imm8(a, 0, 0)
+  set a = jl(a, "fail_empty")
+  set a = mov_reg_mem(a, 1, 5, 248)
+  set a = cmp_reg(a, 0, 1)
+  set a = jae(a, "fail_empty")
+  set a = shl_reg_imm8(a, 0, 4)
+  set a = mov_reg_mem(a, 1, 5, 256)
+  set a = add_reg(a, 0, 1)
+  set a = mov_reg_mem(a, 12, 0, 0)
+  set a = mov_reg_mem(a, 2, 0, 8)
+  set a = mov_reg_reg(a, 0, 12)
+  set a = call_label(a, "push_bytes")
+  set a = jmp_label(a, "dispatch")
+  set a = label(a, "op_len")
+  set a = call_label(a, "pop_cell")
+  set a = mov_reg_mem(a, 0, 3, 0)
+  set a = cmp_reg_imm8(a, 0, 1)
+  set a = jnz(a, "fail_empty")
+  set a = mov_reg_mem(a, 0, 3, 16)
+  set a = call_label(a, "push_i64")
+  set a = jmp_label(a, "dispatch")
+  set a = label(a, "op_field_n")
+  set a = call_label(a, "pop_cell")
+  set a = mov_reg_mem(a, 0, 3, 0)
+  set a = cmp_reg_imm8(a, 0, 2)
+  set a = jnz(a, "fail_empty")
+  set a = mov_reg_mem(a, 0, 3, 24)
+  set a = call_label(a, "push_i64")
+  set a = jmp_label(a, "dispatch")
+  set a = label(a, "op_field_text")
+  set a = call_label(a, "pop_cell")
+  set a = mov_reg_mem(a, 0, 3, 0)
+  set a = cmp_reg_imm8(a, 0, 2)
+  set a = jnz(a, "fail_empty")
+  set a = mov_reg_mem(a, 0, 3, 8)
+  set a = mov_reg_mem(a, 2, 3, 16)
+  set a = call_label(a, "push_bytes")
+  set a = jmp_label(a, "dispatch")
+  set a = label(a, "op_i64")
+  set a = call_label(a, "pop_cell")
+  set a = mov_reg_mem(a, 0, 3, 0)
+  set a = cmp_reg_imm8(a, 0, 1)
+  set a = jnz(a, "fail_empty")
+  set a = mov_reg_mem(a, 12, 3, 8)
+  set a = mov_reg_mem(a, 13, 3, 16)
+  set a = test_reg(a, 13, 13)
+  set a = jz(a, "fail_empty")
+  set a = xor_reg(a, 14, 14)
+  set a = xor_reg(a, 15, 15)
+  set a = mov_reg_reg(a, 0, 12)
+  set a = movzx_reg_byte_mem(a, 0, 0, 0)
+  set a = cmp_reg_imm8(a, 0, 43)
+  set a = je(a, "i64_sign")
+  set a = cmp_reg_imm8(a, 0, 45)
+  set a = jnz(a, "i64_digits")
+  set a = mov_reg_imm32(a, 15, 1)
+  set a = label(a, "i64_sign")
+  set a = mov_reg_imm32(a, 14, 1)
+  set a = cmp_reg(a, 14, 13)
+  set a = jae(a, "fail_empty")
+  set a = label(a, "i64_digits")
+  set a = xor_reg(a, 0, 0)
+  set a = mov_mem_reg(a, 5, 264, 0)
+  set a = label(a, "i64_loop")
+  set a = cmp_reg(a, 14, 13)
+  set a = jae(a, "i64_done")
+  set a = mov_reg_reg(a, 0, 12)
+  set a = add_reg(a, 0, 14)
+  set a = movzx_reg_byte_mem(a, 0, 0, 0)
+  set a = cmp_reg_imm8(a, 0, 48)
+  set a = jb(a, "fail_empty")
+  set a = cmp_reg_imm8(a, 0, 57)
+  set a = ja(a, "fail_empty")
+  set a = sub_reg_imm8(a, 0, 48)
+  set a = mov_reg_reg(a, 11, 0)
+  set a = mov_reg_mem(a, 0, 5, 264)
+  set a = mov_reg_imm32(a, 1, 10)
+  set a = mul_rcx(a)
+  set a = test_reg(a, 2, 2)
+  set a = jnz(a, "fail_empty")
+  set a = add_reg(a, 0, 11)
+  set a = jb(a, "fail_empty")
+  set a = mov_mem_reg(a, 5, 264, 0)
+  set a = inc_reg(a, 14)
+  set a = jmp_label(a, "i64_loop")
+  set a = label(a, "i64_done")
+  set a = mov_reg_mem(a, 0, 5, 264)
+  set a = test_reg(a, 15, 15)
+  set a = jnz(a, "i64_neg")
+  set a = mov_reg_reg(a, 1, 0)
+  set a = shr_reg_imm8(a, 1, 63)
+  set a = jnz(a, "fail_empty")
+  set a = call_label(a, "push_i64")
+  set a = jmp_label(a, "dispatch")
+  set a = label(a, "i64_neg")
+  set a = mov_reg_imm32(a, 1, 1)
+  set a = shl_reg_imm8(a, 1, 63)
+  set a = cmp_reg(a, 0, 1)
+  set a = ja(a, "fail_empty")
+  set a = neg_reg(a, 0)
+  set a = call_label(a, "push_i64")
+  set a = jmp_label(a, "dispatch")
+  set a = label(a, "op_line")
+  set a = call_label(a, "pop_cell")
+  set a = mov_reg_mem(a, 12, 3, 8)
+  set a = call_label(a, "pop_cell")
+  set a = mov_reg_mem(a, 13, 3, 8)
+  set a = call_label(a, "pop_cell")
+  set a = mov_reg_mem(a, 0, 3, 0)
+  set a = cmp_reg_imm8(a, 0, 1)
+  set a = jnz(a, "fail_empty")
+  set a = mov_reg_mem(a, 14, 3, 8)
+  set a = mov_reg_mem(a, 15, 3, 16)
+  set a = cmp_reg_imm8(a, 13, 0)
+  set a = jl(a, "fail_empty")
+  set a = cmp_reg(a, 13, 15)
+  set a = ja(a, "fail_empty")
+  set a = mov_reg_reg(a, 1, 13)
+  set a = label(a, "line_scan")
+  set a = cmp_reg(a, 1, 15)
+  set a = jae(a, "line_scanned")
+  set a = mov_reg_reg(a, 0, 14)
+  set a = add_reg(a, 0, 1)
+  set a = movzx_reg_byte_mem(a, 0, 0, 0)
+  set a = cmp_reg_imm8(a, 0, 10)
+  set a = je(a, "line_scanned")
+  set a = inc_reg(a, 1)
+  set a = jmp_label(a, "line_scan")
+  set a = label(a, "line_scanned")
+  set a = mov_reg_reg(a, 2, 1)
+  set a = cmp_reg(a, 2, 13)
+  set a = jbe(a, "line_nocr")
+  set a = mov_reg_reg(a, 0, 14)
+  set a = add_reg(a, 0, 2)
+  set a = dec_reg(a, 0)
+  set a = movzx_reg_byte_mem(a, 0, 0, 0)
+  set a = cmp_reg_imm8(a, 0, 13)
+  set a = jnz(a, "line_nocr")
+  set a = dec_reg(a, 2)
+  set a = label(a, "line_nocr")
+  set a = mov_reg_reg(a, 10, 15)
+  set a = cmp_reg(a, 1, 15)
+  set a = je(a, "line_have_next")
+  set a = mov_reg_reg(a, 10, 1)
+  set a = inc_reg(a, 10)
+  set a = label(a, "line_have_next")
+  set a = mov_reg_reg(a, 11, 2)
+  set a = sub_reg(a, 11, 13)
+  set a = mov_reg_reg(a, 0, 14)
+  set a = add_reg(a, 0, 13)
+  set a = mov_reg_reg(a, 2, 11)
+  set a = mov_reg_reg(a, 8, 12)
+  set a = call_label(a, "push_line")
+  set a = mov_reg_reg(a, 0, 10)
+  set a = call_label(a, "push_i64")
+  set a = jmp_label(a, "dispatch")
+  return a
+end
+
+fn emit_open(src: unit) -> unit
+  let a = src
+  set a = label(a, "fail_saved")
+  set a = mov_mem_imm32(a, 5, 48, 1)
+  set a = mov_mem_reg(a, 5, 56, 0)
+  set a = mov_mem_reg(a, 5, 64, 2)
+  set a = jmp_label(a, "dispatch")
+  set a = label(a, "op_open")
+  set a = call_label(a, "pop_cell")
+  set a = mov_reg_mem(a, 0, 3, 0)
+  set a = cmp_reg_imm8(a, 0, 1)
+  set a = jnz(a, "fail_empty")
+  set a = mov_reg_mem(a, 0, 3, 8)
+  set a = mov_reg_mem(a, 2, 3, 16)
+  set a = mov_mem_reg(a, 5, 352, 0)
+  set a = mov_mem_reg(a, 5, 360, 2)
+  set a = call_label(a, "pop_cell")
+  set a = mov_reg_mem(a, 0, 3, 0)
+  set a = cmp_reg_imm8(a, 0, 1)
+  set a = jnz(a, "fail_empty")
+  set a = mov_reg_mem(a, 0, 3, 8)
+  set a = mov_reg_mem(a, 2, 3, 16)
+  set a = mov_mem_reg(a, 5, 336, 0)
+  set a = mov_mem_reg(a, 5, 344, 2)
+  set a = call_label(a, "pop_cell")
+  set a = mov_reg_mem(a, 0, 3, 0)
+  set a = cmp_reg_imm8(a, 0, 1)
+  set a = jnz(a, "fail_empty")
+  set a = mov_reg_mem(a, 0, 3, 8)
+  set a = mov_reg_mem(a, 2, 3, 16)
+  set a = mov_mem_reg(a, 5, 320, 0)
+  set a = mov_mem_reg(a, 5, 328, 2)
+  set a = call_label(a, "pop_cell")
+  set a = mov_reg_mem(a, 0, 3, 8)
+  set a = mov_mem_reg(a, 5, 312, 0)
+  set a = call_label(a, "pop_cell")
+  set a = mov_reg_mem(a, 0, 3, 0)
+  set a = cmp_reg_imm8(a, 0, 1)
+  set a = jnz(a, "fail_empty")
+  set a = mov_reg_mem(a, 0, 3, 8)
+  set a = mov_reg_mem(a, 2, 3, 16)
+  set a = mov_mem_reg(a, 5, 296, 0)
+  set a = mov_mem_reg(a, 5, 304, 2)
+  set a = mov_reg_mem(a, 0, 5, 312)
+  set a = cmp_reg_imm8(a, 0, 0)
+  set a = jl(a, "open_large")
+  set a = xor_reg(a, 1, 1)
+  set a = label(a, "open_nul")
+  set a = mov_reg_mem(a, 2, 5, 304)
+  set a = cmp_reg(a, 1, 2)
+  set a = jae(a, "open_zpath")
+  set a = mov_reg_mem(a, 0, 5, 296)
+  set a = add_reg(a, 0, 1)
+  set a = movzx_reg_byte_mem(a, 0, 0, 0)
+  set a = test_reg(a, 0, 0)
+  set a = jz(a, "open_missing")
+  set a = inc_reg(a, 1)
+  set a = jmp_label(a, "open_nul")
+  set a = label(a, "open_zpath")
+  set a = mov_reg_mem(a, 1, 5, 304)
+  set a = add_reg_imm8(a, 1, 1)
+  set a = jb(a, "oom")
+  set a = call_label(a, "alloc")
+  set a = mov_mem_reg(a, 5, 368, 0)
+  set a = mov_reg_reg(a, 1, 0)
+  set a = mov_reg_mem(a, 2, 5, 296)
+  set a = mov_reg_mem(a, 8, 5, 304)
+  set a = call_label(a, "memcpy")
+  set a = mov_reg_mem(a, 0, 5, 368)
+  set a = mov_reg_mem(a, 1, 5, 304)
+  set a = add_reg(a, 0, 1)
+  set a = xor_reg(a, 2, 2)
+  set a = mov_mem8_reg(a, 0, 0, 2)
+  set a = mov_reg_mem(a, 1, 5, 368)
+  set a = sub_rsp_imm32(a, 32)
+  set a = call_rip(a, "iat_kernel32_GetFileAttributesA")
+  set a = add_rsp_imm32(a, 32)
+  set a = raw_byte(a, 131)
+  set a = raw_byte(a, 248)
+  set a = raw_byte(a, 255)
+  set a = je(a, "open_missing")
+  set a = raw_byte(a, 168)
+  set a = raw_byte(a, 16)
+  set a = jnz(a, "open_missing")
+  set a = mov_reg_mem(a, 1, 5, 368)
+  set a = mov_reg_imm32(a, 2, 2147483648)
+  set a = mov_reg_imm32(a, 8, 1)
+  set a = xor_reg(a, 9, 9)
+  set a = sub_rsp_imm32(a, 64)
+  set a = mov_rsp_imm32(a, 32, 3)
+  set a = mov_rsp_imm32(a, 40, 128)
+  set a = mov_rsp_imm32(a, 48, 0)
+  set a = call_rip(a, "iat_kernel32_CreateFileA")
+  set a = add_rsp_imm32(a, 64)
+  set a = mov_mem_reg(a, 5, 272, 0)
+  set a = mov_reg_imm64(a, 1, -1)
+  set a = cmp_reg(a, 0, 1)
+  set a = je(a, "open_missing")
+  set a = mov_reg_mem(a, 1, 5, 272)
+  set a = mov_reg_reg(a, 2, 5)
+  set a = add_reg_imm32(a, 2, 264)
+  set a = sub_rsp_imm32(a, 32)
+  set a = call_rip(a, "iat_kernel32_GetFileSizeEx")
+  set a = add_rsp_imm32(a, 32)
+  set a = test_reg(a, 0, 0)
+  set a = jz(a, "open_close_missing")
+  set a = mov_reg_mem(a, 0, 5, 264)
+  set a = cmp_reg_imm8(a, 0, 0)
+  set a = jl(a, "open_close_large")
+  set a = je(a, "open_close_empty")
+  set a = mov_reg_mem(a, 1, 5, 312)
+  set a = cmp_reg(a, 0, 1)
+  set a = jg(a, "open_close_large")
+  set a = mov_reg_reg(a, 1, 0)
+  set a = add_reg_imm8(a, 1, 7)
+  set a = and_reg_imm8(a, 1, 248)
+  set a = mov_reg_mem(a, 2, 5, 80)
+  set a = mov_reg_mem(a, 8, 5, 72)
+  set a = sub_reg(a, 2, 8)
+  set a = cmp_reg(a, 1, 2)
+  set a = ja(a, "open_close_large")
+  set a = mov_mem_reg(a, 5, 288, 0)
+  set a = mov_reg_mem(a, 1, 5, 288)
+  set a = call_label(a, "alloc")
+  set a = mov_mem_reg(a, 5, 280, 0)
+  set a = xor_reg(a, 15, 15)
+  set a = label(a, "open_read")
+  set a = mov_reg_mem(a, 0, 5, 288)
+  set a = cmp_reg(a, 15, 0)
+  set a = jae(a, "open_read_done")
+  set a = mov_reg_mem(a, 1, 5, 272)
+  set a = mov_reg_mem(a, 2, 5, 280)
+  set a = add_reg(a, 2, 15)
+  set a = mov_reg_reg(a, 8, 0)
+  set a = sub_reg(a, 8, 15)
+  set a = mov_reg_reg(a, 9, 5)
+  set a = add_reg_imm32(a, 9, 376)
+  set a = xor_reg(a, 0, 0)
+  set a = mov_mem_reg(a, 5, 376, 0)
+  set a = sub_rsp_imm32(a, 64)
+  set a = mov_rsp_imm32(a, 32, 0)
+  set a = call_rip(a, "iat_kernel32_ReadFile")
+  set a = add_rsp_imm32(a, 64)
+  set a = test_reg(a, 0, 0)
+  set a = jz(a, "open_close_missing")
+  set a = mov_reg_mem(a, 1, 5, 376)
+  set a = test_reg(a, 1, 1)
+  set a = jz(a, "open_close_missing")
+  set a = add_reg(a, 15, 1)
+  set a = mov_reg_mem(a, 0, 5, 288)
+  set a = cmp_reg(a, 15, 0)
+  set a = ja(a, "open_close_missing")
+  set a = jmp_label(a, "open_read")
+  set a = label(a, "open_read_done")
+  set a = mov_reg_mem(a, 1, 5, 272)
+  set a = sub_rsp_imm32(a, 32)
+  set a = call_rip(a, "iat_kernel32_CloseHandle")
+  set a = add_rsp_imm32(a, 32)
+  set a = mov_reg_mem(a, 0, 5, 280)
+  set a = mov_reg_mem(a, 2, 5, 288)
+  set a = call_label(a, "push_bytes")
+  set a = jmp_label(a, "dispatch")
+  set a = label(a, "open_close_missing")
+  set a = mov_reg_mem(a, 1, 5, 272)
+  set a = sub_rsp_imm32(a, 32)
+  set a = call_rip(a, "iat_kernel32_CloseHandle")
+  set a = add_rsp_imm32(a, 32)
+  set a = jmp_label(a, "open_missing")
+  set a = label(a, "open_close_empty")
+  set a = mov_reg_mem(a, 1, 5, 272)
+  set a = sub_rsp_imm32(a, 32)
+  set a = call_rip(a, "iat_kernel32_CloseHandle")
+  set a = add_rsp_imm32(a, 32)
+  set a = jmp_label(a, "open_empty")
+  set a = label(a, "open_close_large")
+  set a = mov_reg_mem(a, 1, 5, 272)
+  set a = sub_rsp_imm32(a, 32)
+  set a = call_rip(a, "iat_kernel32_CloseHandle")
+  set a = add_rsp_imm32(a, 32)
+  set a = jmp_label(a, "open_large")
+  set a = label(a, "open_empty")
+  set a = mov_reg_mem(a, 0, 5, 336)
+  set a = mov_reg_mem(a, 2, 5, 344)
+  set a = jmp_label(a, "fail_saved")
+  set a = label(a, "open_large")
+  set a = mov_reg_mem(a, 0, 5, 352)
+  set a = mov_reg_mem(a, 2, 5, 360)
+  set a = jmp_label(a, "fail_saved")
+  set a = label(a, "open_missing")
+  set a = mov_reg_mem(a, 14, 5, 320)
+  set a = mov_reg_mem(a, 15, 5, 328)
+  set a = mov_reg_mem(a, 12, 5, 296)
+  set a = mov_reg_mem(a, 13, 5, 304)
+  set a = mov_reg_imm32(a, 0, 1)
+  set a = mov_mem_reg(a, 5, 200, 0)
+  set a = jmp_label(a, "cat_join")
   return a
 end
 
@@ -1573,7 +2158,12 @@ fn lex(text: bytes) -> list tok
                                           set i = i + 1 else fail "math"
                                         end
                                       else
-                                        fail "bad character"
+                                        if c == 46
+                                          set toks = push(toks, tok(19, 0, ""))
+                                          set i = i + 1 else fail "math"
+                                        else
+                                          fail "bad character"
+                                        end
                                       end
                                     end
                                   end
@@ -1702,6 +2292,14 @@ fn emit_iffail(p: prog) -> prog
   return take_code(marked, byte(11) ++ byte(0) ++ byte(0) ++ byte(0) ++ byte(0))
 end
 
+fn emit_pop_slot(p: prog, slot: i64) -> prog
+  return take_code(p, byte(6) ++ u16(slot))
+end
+
+fn emit_push_slot(p: prog, slot: i64) -> prog
+  return take_code(p, byte(7) ++ u16(slot))
+end
+
 fn intern_i64(p: prog, n: i64) -> prog
   if has(p.imap, n)
     return p
@@ -1809,19 +2407,135 @@ fn parse_atom(p: prog, toks: list tok, pos: i64) -> parsed
     if eqb(at(toks, pos).text, "fail")
       return parse_fail_expr(p, toks, pos)
     end
+    if eqb(at(toks, pos).text, "reason")
+      return parsed(take_code(p, byte(29)), pos + 1 else fail "math", 2)
+    end
     if tok_is(toks, pos + 1 else fail "math", 6)
       return parse_call(p, toks, pos)
     end
     let nxt3 = push_local(p, at(toks, pos).text)
     let raw = get(p.slots, at(toks, pos).text) else fail "unknown name"
-    return parsed(nxt3, pos + 1 else fail "math", slot_kind(raw))
+    let sk = slot_kind(raw)
+    if tok_is(toks, pos + 1 else fail "math", 19) == 0
+      return parsed(nxt3, pos + 1 else fail "math", sk)
+    end
+    if sk != 3
+      fail "field"
+    end
+    if tok_is(toks, pos + 2 else fail "math", 1) == 0
+      fail "field"
+    end
+    let field = at(toks, pos + 2 else fail "math").text
+    if eqb(field, "text")
+      return parsed(take_code(nxt3, byte(28)), pos + 3 else fail "math", 2)
+    end
+    if eqb(field, "n")
+      return parsed(take_code(nxt3, byte(27)), pos + 3 else fail "math", 1)
+    end
+    fail "field"
+    return parsed(nxt3, pos, 0)
   end
   fail "bad expression"
   return parsed(p, pos, 0)
 end
 
+fn parse_argc(p: prog, toks: list tok, pos: i64) -> parsed
+  if tok_is(toks, pos + 1 else fail "math", 6) == 0
+    fail "expected ("
+  end
+  if tok_is(toks, pos + 2 else fail "math", 7) == 0
+    fail "arity"
+  end
+  return parsed(take_code(p, byte(21)), pos + 3 else fail "math", 1)
+end
+
+fn parse_one(p: prog, toks: list tok, pos: i64, want: i64, op: i64, outk: i64) -> parsed
+  if tok_is(toks, pos + 1 else fail "math", 6) == 0
+    fail "expected ("
+  end
+  let cur = parse_expr(p, toks, pos + 2 else fail "math")
+  if cur.kind != want
+    fail "type"
+  end
+  if tok_is(toks, cur.pos, 7) == 0
+    fail "expected )"
+  end
+  let done = emit_iffail(take_code(cur.prog, byte(op)))
+  return parsed(done, cur.pos + 1 else fail "math", outk)
+end
+
+fn parse_arg(p: prog, toks: list tok, pos: i64) -> parsed
+  return parse_one(p, toks, pos, 1, 22, 2)
+end
+
+fn parse_i64_call(p: prog, toks: list tok, pos: i64) -> parsed
+  return parse_one(p, toks, pos, 2, 20, 1)
+end
+
+fn parse_len(p: prog, toks: list tok, pos: i64) -> parsed
+  return parse_one(p, toks, pos, 2, 25, 1)
+end
+
+fn parse_open(p: prog, toks: list tok, pos: i64) -> parsed
+  if tok_is(toks, pos + 1 else fail "math", 6) == 0
+    fail "expected ("
+  end
+  let a1 = parse_expr(p, toks, pos + 2 else fail "math")
+  if a1.kind != 2
+    fail "type"
+  end
+  if tok_is(toks, a1.pos, 8) == 0
+    fail "expected ,"
+  end
+  let a2 = parse_expr(a1.prog, toks, a1.pos + 1 else fail "math")
+  if a2.kind != 1
+    fail "type"
+  end
+  if tok_is(toks, a2.pos, 8) == 0
+    fail "expected ,"
+  end
+  let a3 = parse_expr(a2.prog, toks, a2.pos + 1 else fail "math")
+  if a3.kind != 2
+    fail "type"
+  end
+  if tok_is(toks, a3.pos, 8) == 0
+    fail "expected ,"
+  end
+  let a4 = parse_expr(a3.prog, toks, a3.pos + 1 else fail "math")
+  if a4.kind != 2
+    fail "type"
+  end
+  if tok_is(toks, a4.pos, 8) == 0
+    fail "expected ,"
+  end
+  let a5 = parse_expr(a4.prog, toks, a4.pos + 1 else fail "math")
+  if a5.kind != 2
+    fail "type"
+  end
+  if tok_is(toks, a5.pos, 7) == 0
+    fail "expected )"
+  end
+  let done = emit_iffail(take_code(a5.prog, byte(23)))
+  return parsed(done, a5.pos + 1 else fail "math", 2)
+end
+
 fn parse_call(p: prog, toks: list tok, pos: i64) -> parsed
   let name = at(toks, pos).text
+  if eqb(name, "argc")
+    return parse_argc(p, toks, pos)
+  end
+  if eqb(name, "arg")
+    return parse_arg(p, toks, pos)
+  end
+  if eqb(name, "open")
+    return parse_open(p, toks, pos)
+  end
+  if eqb(name, "i64")
+    return parse_i64_call(p, toks, pos)
+  end
+  if eqb(name, "len")
+    return parse_len(p, toks, pos)
+  end
   if has(p.fnames, name) == 0
     fail "unknown function"
   end
@@ -2223,8 +2937,94 @@ fn end_stmt(p: prog) -> prog
     let jumped = emit_rel(p, 8, top.alt)
     return with_blocks(mark_prog(jumped, top.done), rest)
   end
+  if top.kind == 4
+    let tail = after(top.done, "n") else fail "block"
+    let numtext = before(tail, "x") else fail "block"
+    let number_slot = i64(numtext) else fail "block"
+    let pushed = emit_push_slot(p, number_slot)
+    let one = push_i64(pushed, 1)
+    let added = emit_add(one)
+    let popped = emit_pop_slot(added, number_slot)
+    let jumped = emit_rel(popped, 8, top.alt)
+    return with_blocks(mark_prog(jumped, top.done), rest)
+  end
   fail "block"
   return p
+end
+
+fn emit_for(p: prog, toks: list tok) -> prog
+  if len(toks) < 6
+    fail "expected a name"
+  end
+  if at(toks, 1).kind != 1
+    fail "expected a name"
+  end
+  if at(toks, 2).kind != 1
+    fail "expected in"
+  end
+  if eqb(at(toks, 2).text, "in") == 0
+    fail "expected in"
+  end
+  if at(toks, 3).kind != 1
+    fail "for needs lines"
+  end
+  if eqb(at(toks, 3).text, "lines") == 0
+    fail "for needs lines"
+  end
+  if at(toks, 4).kind != 6
+    fail "expected ("
+  end
+  let name = at(toks, 1).text
+  if has(p.slots, name)
+    fail "already bound"
+  end
+  let cur = parse_expr(p, toks, 5)
+  if cur.kind != 2
+    fail "lines needs bytes"
+  end
+  if tok_is(toks, cur.pos, 7) == 0
+    fail "expected )"
+  end
+  let endp = cur.pos + 1 else fail "math"
+  if endp != len(toks)
+    fail "extra tokens"
+  end
+  let base = len(cur.prog.slots)
+  let text_slot = base
+  let index_slot = base + 1 else fail "math"
+  let number_slot = base + 2 else fail "math"
+  let line_slot = base + 3 else fail "math"
+  let n = cur.prog.seen + 1 else fail "math"
+  let loop = "k" ++ n
+  let body = "b" ++ n
+  let done = "n" ++ number_slot ++ "x" ++ n
+  let slots = cur.prog.slots
+  set slots = put(slots, byte(1) ++ n ++ "t", pack_slot(text_slot, 2))
+  set slots = put(slots, byte(1) ++ n ++ "i", pack_slot(index_slot, 1))
+  set slots = put(slots, byte(1) ++ n ++ "u", pack_slot(number_slot, 1))
+  set slots = put(slots, name, pack_slot(line_slot, 3))
+  let bound = with_slots(with_seen(cur.prog, n), slots)
+  let popped = emit_pop_slot(bound, text_slot)
+  let zero = push_i64(popped, 0)
+  let popz = emit_pop_slot(zero, index_slot)
+  let one = push_i64(popz, 1)
+  let popn = emit_pop_slot(one, number_slot)
+  let looped = mark_prog(popn, loop)
+  let pushed = emit_push_slot(looped, index_slot)
+  let pushed2 = emit_push_slot(pushed, text_slot)
+  let lengthed = emit_iffail(take_code(pushed2, byte(25)))
+  let cmpd = take_code(lengthed, byte(18) ++ byte(5))
+  let to_body = emit_rel(cmpd, 9, body)
+  let to_done = emit_rel(to_body, 8, done)
+  let at_body = mark_prog(to_done, body)
+  let ptext = emit_push_slot(at_body, text_slot)
+  let pindex = emit_push_slot(ptext, index_slot)
+  let pnum = emit_push_slot(pindex, number_slot)
+  let viewed = emit_iffail(take_code(pnum, byte(26)))
+  let popi = emit_pop_slot(viewed, index_slot)
+  let popl = emit_pop_slot(popi, line_slot)
+  let blocks = push(popl.blocks, block(4, loop, done))
+  return with_blocks(popl, blocks)
 end
 
 
@@ -2282,6 +3082,9 @@ fn on_line(p: prog, text: bytes) -> prog
   end
   if eqb(head, "while")
     return emit_while(p, toks)
+  end
+  if eqb(head, "for")
+    return emit_for(p, toks)
   end
   if eqb(head, "fail")
     return emit_fail_stmt(p, toks)
@@ -2500,14 +3303,14 @@ fn mem_image(p: prog) -> bytes
   if gap != 0
     set padded = p.code ++ zeros(8 - gap else fail "math")
   end
-  let pool_off = 256 + len(padded) else fail "math"
+  let pool_off = 512 + len(padded) else fail "math"
   let funcs_off = pool_off + len(p.pool) else fail "math"
-  let mem = zeros(256) ++ padded ++ p.pool ++ p.funcs
+  let mem = zeros(512) ++ padded ++ p.pool ++ p.funcs
   set mem = poke(mem, 16, p.main_off, 8)
   set mem = poke(mem, 24, p.main_slots, 8)
   set mem = poke(mem, 104, len(p.code), 8)
   set mem = poke(mem, 208, p.nconst, 8)
-  set mem = poke(mem, 216, 256, 8)
+  set mem = poke(mem, 216, 512, 8)
   set mem = poke(mem, 224, pool_off, 8)
   set mem = poke(mem, 232, funcs_off, 8)
   return mem
@@ -2664,6 +3467,12 @@ fn link_exe(p: prog) -> bytes
   set s = place(s.data, s.symbols, "hint_kernel32.dll_WriteFile", hint0 ++ "WriteFile" ++ byte(0), 2, data_rva)
   set s = place(s.data, s.symbols, "hint_kernel32.dll_ExitProcess", hint0 ++ "ExitProcess" ++ byte(0), 2, data_rva)
   set s = place(s.data, s.symbols, "hint_kernel32.dll_VirtualAlloc", hint0 ++ "VirtualAlloc" ++ byte(0), 2, data_rva)
+  set s = place(s.data, s.symbols, "hint_kernel32.dll_GetCommandLineA", hint0 ++ "GetCommandLineA" ++ byte(0), 2, data_rva)
+  set s = place(s.data, s.symbols, "hint_kernel32.dll_CreateFileA", hint0 ++ "CreateFileA" ++ byte(0), 2, data_rva)
+  set s = place(s.data, s.symbols, "hint_kernel32.dll_ReadFile", hint0 ++ "ReadFile" ++ byte(0), 2, data_rva)
+  set s = place(s.data, s.symbols, "hint_kernel32.dll_GetFileSizeEx", hint0 ++ "GetFileSizeEx" ++ byte(0), 2, data_rva)
+  set s = place(s.data, s.symbols, "hint_kernel32.dll_CloseHandle", hint0 ++ "CloseHandle" ++ byte(0), 2, data_rva)
+  set s = place(s.data, s.symbols, "hint_kernel32.dll_GetFileAttributesA", hint0 ++ "GetFileAttributesA" ++ byte(0), 2, data_rva)
   set data = bpad(s.data, 8)
   set symbols = s.symbols
   let ilt_at = data.count
@@ -2672,10 +3481,22 @@ fn link_exe(p: prog) -> bytes
   let h2 = get(symbols, "hint_kernel32.dll_WriteFile") else fail "hint"
   let h3 = get(symbols, "hint_kernel32.dll_ExitProcess") else fail "hint"
   let h4 = get(symbols, "hint_kernel32.dll_VirtualAlloc") else fail "hint"
+  let h5 = get(symbols, "hint_kernel32.dll_GetCommandLineA") else fail "hint"
+  let h6 = get(symbols, "hint_kernel32.dll_CreateFileA") else fail "hint"
+  let h7 = get(symbols, "hint_kernel32.dll_ReadFile") else fail "hint"
+  let h8 = get(symbols, "hint_kernel32.dll_GetFileSizeEx") else fail "hint"
+  let h9 = get(symbols, "hint_kernel32.dll_CloseHandle") else fail "hint"
+  let h10 = get(symbols, "hint_kernel32.dll_GetFileAttributesA") else fail "hint"
   set data = badd(data, q8(h1))
   set data = badd(data, q8(h2))
   set data = badd(data, q8(h3))
   set data = badd(data, q8(h4))
+  set data = badd(data, q8(h5))
+  set data = badd(data, q8(h6))
+  set data = badd(data, q8(h7))
+  set data = badd(data, q8(h8))
+  set data = badd(data, q8(h9))
+  set data = badd(data, q8(h10))
   set data = badd(data, q8(0))
   set data = bpad(data, 8)
   let iat_at = data.count
@@ -2688,6 +3509,18 @@ fn link_exe(p: prog) -> bytes
   set data = badd(data, q8(h3))
   set symbols = put(symbols, "iat_kernel32_VirtualAlloc", data_rva + data.count else fail "math")
   set data = badd(data, q8(h4))
+  set symbols = put(symbols, "iat_kernel32_GetCommandLineA", data_rva + data.count else fail "math")
+  set data = badd(data, q8(h5))
+  set symbols = put(symbols, "iat_kernel32_CreateFileA", data_rva + data.count else fail "math")
+  set data = badd(data, q8(h6))
+  set symbols = put(symbols, "iat_kernel32_ReadFile", data_rva + data.count else fail "math")
+  set data = badd(data, q8(h7))
+  set symbols = put(symbols, "iat_kernel32_GetFileSizeEx", data_rva + data.count else fail "math")
+  set data = badd(data, q8(h8))
+  set symbols = put(symbols, "iat_kernel32_CloseHandle", data_rva + data.count else fail "math")
+  set data = badd(data, q8(h9))
+  set symbols = put(symbols, "iat_kernel32_GetFileAttributesA", data_rva + data.count else fail "math")
+  set data = badd(data, q8(h10))
   set data = badd(data, q8(0))
   set data = bpad(data, 4)
   let import_at = data.count
