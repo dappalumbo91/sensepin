@@ -59,13 +59,13 @@ struct cold
   pool: bytes
   nconst: i64
   strs: buf
-  funcs: bytes
+  funcs: buf
   marks: buf
   imap: bytes
-  bmap: bytes
-  smap: bytes
-  fnames: bytes
-  arity: bytes
+  bmap: buf
+  smap: buf
+  fnames: buf
+  arity: buf
   slots: map bytes i64
   unwind: bytes
   main_off: i64
@@ -85,7 +85,7 @@ struct cold
   nstruct: i64
   building: bytes
   nfield: i64
-  rets: bytes
+  rets: buf
 end
 
 struct prog
@@ -3210,7 +3210,7 @@ fn tok_is(toks: toks, pos: i64, kind: i64) -> i64
   return 0
 end
 
-fn spawn(code: bytes, pool: bytes, nconst: i64, strs: buf, funcs: bytes, jumps: buf, marks: buf, imap: bytes, bmap: bytes, smap: bytes, fnames: bytes, arity: bytes, slots: map bytes i64, unwind: bytes, main_off: i64, main_slots: i64, saw_main: i64, live: i64, start: i64, nparams: i64, is_main: i64, seen: i64, cbuf: buf, blocks: list block, failto: bytes, pbuf: buf, sname: map bytes i64, sfld: map bytes i64, nstruct: i64, building: bytes, nfield: i64, rets: bytes) -> prog
+fn spawn(code: bytes, pool: bytes, nconst: i64, strs: buf, funcs: buf, jumps: buf, marks: buf, imap: bytes, bmap: buf, smap: buf, fnames: buf, arity: buf, slots: map bytes i64, unwind: bytes, main_off: i64, main_slots: i64, saw_main: i64, live: i64, start: i64, nparams: i64, is_main: i64, seen: i64, cbuf: buf, blocks: list block, failto: bytes, pbuf: buf, sname: map bytes i64, sfld: map bytes i64, nstruct: i64, building: bytes, nfield: i64, rets: buf) -> prog
   let held = cold(code, pool, nconst, strs, funcs, marks, imap, bmap, smap, fnames, arity, slots, unwind, main_off, main_slots, saw_main, live, start, nparams, is_main, seen, cbuf.parts, blocks, failto, pbuf, sname, sfld, nstruct, building, nfield, rets)
   return prog(cbuf.part, cbuf.fills, cbuf.count, jumps, held)
 end
@@ -3235,20 +3235,20 @@ fn with_pool_i(p: prog, pbuf: buf, nconst: i64, imap: bytes) -> prog
   return spawn(p.cold.code, p.cold.pool, nconst, p.cold.strs, p.cold.funcs, p.jumps, p.cold.marks, imap, p.cold.bmap, p.cold.smap, p.cold.fnames, p.cold.arity, p.cold.slots, p.cold.unwind, p.cold.main_off, p.cold.main_slots, p.cold.saw_main, p.cold.live, p.cold.start, p.cold.nparams, p.cold.is_main, p.cold.seen, as_buf(p), p.cold.blocks, p.cold.failto, pbuf, p.cold.sname, p.cold.sfld, p.cold.nstruct, p.cold.building, p.cold.nfield, p.cold.rets)
 end
 
-fn with_pool_b(p: prog, pbuf: buf, nconst: i64, strs: buf, bmap: bytes, smap: bytes) -> prog
+fn with_pool_b(p: prog, pbuf: buf, nconst: i64, strs: buf, bmap: buf, smap: buf) -> prog
   return spawn(p.cold.code, p.cold.pool, nconst, strs, p.cold.funcs, p.jumps, p.cold.marks, p.cold.imap, bmap, smap, p.cold.fnames, p.cold.arity, p.cold.slots, p.cold.unwind, p.cold.main_off, p.cold.main_slots, p.cold.saw_main, p.cold.live, p.cold.start, p.cold.nparams, p.cold.is_main, p.cold.seen, as_buf(p), p.cold.blocks, p.cold.failto, pbuf, p.cold.sname, p.cold.sfld, p.cold.nstruct, p.cold.building, p.cold.nfield, p.cold.rets)
 end
 
 
-fn fresh(fnames: bytes, arity: bytes, sname: map bytes i64, sfld: map bytes i64, nstruct: i64, rets: bytes) -> prog
+fn fresh(fnames: buf, arity: buf, sname: map bytes i64, sfld: map bytes i64, nstruct: i64, rets: buf) -> prog
   let slots: map bytes i64 = map()
   let blocks: list block = list()
-  let bmap = note_bytes("", 0, "\n")
-  return spawn("", "", 0, badd(bnew(), "\n"), "", bnew(), bnew(), "", bmap, "", fnames, arity, slots, "", 0, 0, 0, 0, 0, 0, 0, 0, bnew(), blocks, "", bnew(), sname, sfld, nstruct, "", 0, rets)
+  let bmap = badd(bnew(), q8(0) ++ u16(1) ++ "\n")
+  return spawn("", "", 0, badd(bnew(), "\n"), bnew(), bnew(), bnew(), "", bmap, bnew(), fnames, arity, slots, "", 0, 0, 0, 0, 0, 0, 0, 0, bnew(), blocks, "", bnew(), sname, sfld, nstruct, "", 0, rets)
 end
 
 fn enter_fn(p: prog, name: bytes, slots: map bytes i64) -> prog
-  let nparams = seek_named(p.cold.arity, name)
+  let nparams = seek_buf(p.cold.arity, name)
   if nparams < 0
     fail "missing fn"
   end
@@ -3275,7 +3275,8 @@ fn close_fn(p: prog) -> prog
     set cur = take_code(cur, byte(32))
   end
   let nlocals = len(cur.cold.slots)
-  let funcs = cur.cold.funcs ++ q8(cur.cold.start) ++ q8(cur.cold.nparams) ++ q8(nlocals)
+  let rec = q8(cur.cold.start) ++ q8(cur.cold.nparams) ++ q8(nlocals)
+  let funcs = badd(cur.cold.funcs, rec)
   let main_off = cur.cold.main_off
   let main_slots = cur.cold.main_slots
   let saw = cur.cold.saw_main
@@ -3340,7 +3341,7 @@ fn intern_i64(p: prog, n: i64) -> prog
     return p
   end
   let rec = pool_rec(0, n, 0, 0)
-  let pbuf = bpush(p.cold.pbuf, rec)
+  let pbuf = badd(p.cold.pbuf, rec)
   let imap = p.cold.imap ++ q8(n) ++ q8(p.cold.nconst)
   return with_pool_i(p, pbuf, p.cold.nconst + 1 else fail "math", imap)
 end
@@ -3355,26 +3356,26 @@ fn push_i64(p: prog, n: i64) -> prog
 end
 
 fn intern_bytes(p: prog, data: bytes) -> prog
-  if seek_named(p.cold.smap, data) >= 0
+  if seek_buf(p.cold.smap, data) >= 0
     return p
   end
-  let off = seek_named(p.cold.bmap, data)
+  let off = seek_buf(p.cold.bmap, data)
   let strs = p.cold.strs
   let bmap = p.cold.bmap
   if off < 0
     set off = p.cold.strs.count
     set strs = badd(p.cold.strs, data)
-    set bmap = note_bytes(p.cold.bmap, off, data)
+    set bmap = badd(p.cold.bmap, q8(off) ++ u16(len(data)) ++ data)
   end
   let rec = pool_rec(257, off, len(data), 0)
-  let pbuf = bpush(p.cold.pbuf, rec)
-  let smap = note_bytes(p.cold.smap, p.cold.nconst, data)
+  let pbuf = badd(p.cold.pbuf, rec)
+  let smap = badd(p.cold.smap, q8(p.cold.nconst) ++ u16(len(data)) ++ data)
   return with_pool_b(p, pbuf, p.cold.nconst + 1 else fail "math", strs, bmap, smap)
 end
 
 fn push_bytes(p: prog, data: bytes) -> prog
   let q = intern_bytes(p, data)
-  let idx = seek_named(q.cold.smap, data)
+  let idx = seek_buf(q.cold.smap, data)
   if idx < 0
     fail "const"
   end
@@ -3441,7 +3442,7 @@ fn with_row(p: prog, sname: map bytes i64, sfld: map bytes i64, nstruct: i64, bu
   return spawn(p.cold.code, p.cold.pool, p.cold.nconst, p.cold.strs, p.cold.funcs, p.jumps, p.cold.marks, p.cold.imap, p.cold.bmap, p.cold.smap, p.cold.fnames, p.cold.arity, p.cold.slots, p.cold.unwind, p.cold.main_off, p.cold.main_slots, p.cold.saw_main, live, p.cold.start, p.cold.nparams, p.cold.is_main, p.cold.seen, as_buf(p), p.cold.blocks, p.cold.failto, p.cold.pbuf, sname, sfld, nstruct, building, nfield, p.cold.rets)
 end
 
-fn with_fns(p: prog, fnames: bytes, arity: bytes, rets: bytes) -> prog
+fn with_fns(p: prog, fnames: buf, arity: buf, rets: buf) -> prog
   return spawn(p.cold.code, p.cold.pool, p.cold.nconst, p.cold.strs, p.cold.funcs, p.jumps, p.cold.marks, p.cold.imap, p.cold.bmap, p.cold.smap, fnames, arity, p.cold.slots, p.cold.unwind, p.cold.main_off, p.cold.main_slots, p.cold.saw_main, p.cold.live, p.cold.start, p.cold.nparams, p.cold.is_main, p.cold.seen, as_buf(p), p.cold.blocks, p.cold.failto, p.cold.pbuf, p.cold.sname, p.cold.sfld, p.cold.nstruct, p.cold.building, p.cold.nfield, rets)
 end
 
@@ -3469,8 +3470,8 @@ fn read_type(p: prog, toks: toks, pos: i64) -> parsed
     let val = read_type(p, toks, key.pos)
     let scaled = key.kind * 1000 else fail "math"
     let body = 2000 + scaled else fail "math"
-    let k = body + val.kind else fail "math"
-    return parsed(p, val.pos, k)
+    let mk = body + val.kind else fail "math"
+    return parsed(p, val.pos, mk)
   end
   if has(p.cold.sname, name) == 0
     fail "type"
@@ -3658,13 +3659,13 @@ fn scan_fns(p: prog, text: bytes) -> prog
               fail "main takes no parameters"
             end
           end
-          if seek_named(fnames, name) >= 0
+          if seek_buf(fnames, name) >= 0
             fail "duplicate function"
           end
           let slots = bind_params(p, toks)
-          set fnames = note_bytes(fnames, count, name)
-          set arity = note_bytes(arity, len(slots), name)
-          set rets = note_bytes(rets, arrow_type(p, toks), name)
+          set fnames = note(fnames, count, name)
+          set arity = note(arity, len(slots), name)
+          set rets = note(rets, arrow_type(p, toks), name)
           set count = count + 1 else fail "math"
         end
       end
@@ -3748,12 +3749,12 @@ fn parse_atom(p: prog, toks: toks, pos: i64) -> parsed
     return take_fields(parsed(nxt3, pos + 1 else fail "math", sk), toks)
   end
   if kind == 11
-    let inner = parse_atom(p, toks, pos + 1 else fail "math")
-    if inner.kind != 1
+    let unary = parse_atom(p, toks, pos + 1 else fail "math")
+    if unary.kind != 1
       fail "type"
     end
-    let negated = emit_iffail(take_code(inner.prog, byte(17)))
-    return parsed(negated, inner.pos, 1)
+    let negated = emit_iffail(take_code(unary.prog, byte(17)))
+    return parsed(negated, unary.pos, 1)
   end
   fail "bad expression"
   return parsed(p, pos, 0)
@@ -3921,10 +3922,10 @@ fn parse_call(p: prog, toks: toks, pos: i64) -> parsed
   if has(p.cold.sname, name)
     return parse_struct_call(p, toks, pos, name)
   end
-  if seek_named(p.cold.fnames, name) < 0
+  if seek_buf(p.cold.fnames, name) < 0
     fail "unknown function"
   end
-  let want = seek_named(p.cold.arity, name)
+  let want = seek_buf(p.cold.arity, name)
   if want < 0
     fail "arity"
   end
@@ -3955,7 +3956,7 @@ fn parse_call(p: prog, toks: toks, pos: i64) -> parsed
     if k == 3
       let lit = tok_text(toks, i)
       set pcur = intern_bytes(pcur, lit)
-      let sx = seek_named(pcur.cold.smap, lit)
+      let sx = seek_buf(pcur.cold.smap, lit)
       if sx < 0
         fail "const"
       end
@@ -3970,8 +3971,6 @@ fn parse_call(p: prog, toks: toks, pos: i64) -> parsed
         set mode = 0
       else
         if tok_is(toks, nxt, 19)
-          set mode = 0
-        else
           let nm = tok_text(toks, i)
           if eqb(nm, "fail")
             set mode = 0
@@ -3984,6 +3983,64 @@ fn parse_call(p: prog, toks: toks, pos: i64) -> parsed
               end
               let raws = get(pcur.cold.slots, nm) else fail "unknown name"
               set code = code ++ byte(7) ++ u16(slot_index(raws))
+              let sk = slot_kind(raws)
+              set i = i + 1 else fail "math"
+              let go = 1
+              while go
+                if tok_is(toks, i, 19) == 0
+                  set go = 0
+                else
+                  if tok_is(toks, i + 1 else fail "math", 1) == 0
+                    fail "field"
+                  end
+                  let field = tok_text(toks, i + 1 else fail "math")
+                  if sk == 3
+                    if eqb(field, "text")
+                      set code = code ++ byte(28)
+                      set sk = 2
+                    else
+                      if eqb(field, "n")
+                        set code = code ++ byte(27)
+                        set sk = 1
+                      else
+                        fail "field"
+                      end
+                    end
+                  else
+                    if sk < 7
+                      fail "field"
+                    end
+                    if sk >= 1000
+                      fail "field"
+                    end
+                    let key = id_text(sk) ++ "/" ++ field
+                    if has(pcur.cold.sfld, key) == 0
+                      fail "field"
+                    end
+                    let packed = get(pcur.cold.sfld, key) else fail "field"
+                    set code = code ++ byte(51) ++ u16(slot_index(packed))
+                    set sk = slot_kind(packed)
+                  end
+                  set i = i + 2 else fail "math"
+                end
+              end
+              set got = got + 1 else fail "math"
+              set took = 1
+            end
+          end
+        else
+          let nm2 = tok_text(toks, i)
+          if eqb(nm2, "fail")
+            set mode = 0
+          else
+            if eqb(nm2, "reason")
+              set mode = 0
+            else
+              if has(pcur.cold.slots, nm2) == 0
+                fail "unknown name"
+              end
+              let raws2 = get(pcur.cold.slots, nm2) else fail "unknown name"
+              set code = code ++ byte(7) ++ u16(slot_index(raws2))
               set i = i + 1 else fail "math"
               set got = got + 1 else fail "math"
               set took = 1
@@ -4035,7 +4092,7 @@ fn parse_call(p: prog, toks: toks, pos: i64) -> parsed
   if got != want
     fail "arity"
   end
-  let idx = seek_named(p.cold.fnames, name)
+  let idx = seek_buf(p.cold.fnames, name)
   if idx < 0
     fail "unknown function"
   end
@@ -4046,7 +4103,7 @@ fn parse_call(p: prog, toks: toks, pos: i64) -> parsed
   let called = take_code(base, code ++ byte(30) ++ u16(idx))
   let failed = emit_iffail(called)
   let rk = 1
-  let rkfound = seek_named(p.cold.rets, name)
+  let rkfound = seek_buf(p.cold.rets, name)
   if rkfound >= 0
     set rk = rkfound
   end
@@ -4310,8 +4367,107 @@ fn parse_struct_call(p: prog, toks: toks, pos: i64, name: bytes) -> parsed
   if tok_is(toks, pos + 1 else fail "math", 6) == 0
     fail "expected ("
   end
-  let cur = parsed(p, pos + 2 else fail "math", 0)
+  let i = pos + 2 else fail "math"
+  let code = ""
+  let pcur = p
   let got = 0
+  let mode = 1
+  if tok_is(toks, i, 7)
+    set i = i + 1 else fail "math"
+    set mode = 2
+  end
+  while mode == 1
+    let k = tok_kind(toks, i)
+    let sk = 0
+    let took = 0
+    if k == 1
+      if tok_is(toks, i + 1 else fail "math", 6)
+        set mode = 0
+      else
+        let nm = tok_text(toks, i)
+        if has(pcur.cold.slots, nm) == 0
+          set mode = 0
+        else
+          let raws = get(pcur.cold.slots, nm) else fail "unknown name"
+          set code = code ++ byte(7) ++ u16(slot_index(raws))
+          set sk = slot_kind(raws)
+          set i = i + 1 else fail "math"
+          let go = 1
+          while go
+            if tok_is(toks, i, 19) == 0
+              set go = 0
+            else
+              if tok_is(toks, i + 1 else fail "math", 1) == 0
+                fail "field"
+              end
+              let field = tok_text(toks, i + 1 else fail "math")
+              if sk == 3
+                if eqb(field, "text")
+                  set code = code ++ byte(28)
+                  set sk = 2
+                else
+                  if eqb(field, "n")
+                    set code = code ++ byte(27)
+                    set sk = 1
+                  else
+                    fail "field"
+                  end
+                end
+              else
+                if sk < 7
+                  fail "field"
+                end
+                if sk >= 1000
+                  fail "field"
+                end
+                let key = id_text(sk) ++ "/" ++ field
+                if has(pcur.cold.sfld, key) == 0
+                  fail "field"
+                end
+                let fp = get(pcur.cold.sfld, key) else fail "field"
+                set code = code ++ byte(51) ++ u16(slot_index(fp))
+                set sk = slot_kind(fp)
+              end
+              set i = i + 2 else fail "math"
+            end
+          end
+          set took = 1
+        end
+      end
+    else
+      set mode = 0
+    end
+    if took
+      let need = get(p.cold.sfld, id_text(id) ++ "." ++ id_text(got)) else fail "field"
+      if sk != need
+        fail "type"
+      end
+      set got = got + 1 else fail "math"
+      if tok_is(toks, i, 8)
+        set i = i + 1 else fail "math"
+      else
+        if tok_is(toks, i, 7)
+          set i = i + 1 else fail "math"
+          set mode = 2
+        else
+          set mode = 0
+        end
+      end
+    else
+      if mode == 1
+        set mode = 0
+      end
+    end
+  end
+  if mode == 2
+    if got != nfields
+      fail "arity"
+    end
+    let built = take_code(pcur, code ++ byte(50) ++ u16(nfields))
+    return parsed(built, i, id)
+  end
+  let cur = parsed(p, pos + 2 else fail "math", 0)
+  set got = 0
   if tok_is(toks, cur.pos, 7) == 0
     set cur = parse_expr(p, toks, cur.pos)
     set got = 1
@@ -4321,8 +4477,8 @@ fn parse_struct_call(p: prog, toks: toks, pos: i64, name: bytes) -> parsed
     end
     while tok_is(toks, cur.pos, 8)
       set cur = parse_expr(cur.prog, toks, cur.pos + 1 else fail "math")
-      let need = get(p.cold.sfld, id_text(id) ++ "." ++ id_text(got)) else fail "field"
-      if cur.kind != need
+      let need2 = get(p.cold.sfld, id_text(id) ++ "." ++ id_text(got)) else fail "field"
+      if cur.kind != need2
         fail "type"
       end
       set got = got + 1 else fail "math"
@@ -4334,8 +4490,8 @@ fn parse_struct_call(p: prog, toks: toks, pos: i64, name: bytes) -> parsed
   if got != nfields
     fail "arity"
   end
-  let built = take_code(cur.prog, byte(50) ++ u16(nfields))
-  return parsed(built, cur.pos + 1 else fail "math", id)
+  let slow = take_code(cur.prog, byte(50) ++ u16(nfields))
+  return parsed(slow, cur.pos + 1 else fail "math", id)
 end
 
 fn parse_at(p: prog, toks: toks, pos: i64) -> parsed
@@ -4732,7 +4888,169 @@ fn emit_append(p: prog, toks: toks, name: bytes, slot: i64) -> prog
   return take_code(bound, byte(33) ++ u16(slot))
 end
 
+fn emit_plain_set(p: prog, toks: toks) -> prog
+  if toks.count < 6
+    return p
+  end
+  if tok_kind(toks, 1) != 1
+    return p
+  end
+  if tok_kind(toks, 2) != 12
+    return p
+  end
+  if tok_kind(toks, 3) != 1
+    return p
+  end
+  if tok_kind(toks, 4) != 6
+    return p
+  end
+  if has_else(toks, 3) >= 0
+    return p
+  end
+  let name = tok_text(toks, 1)
+  if has(p.cold.slots, name) == 0
+    return p
+  end
+  let raw = get(p.cold.slots, name) else fail "unknown name"
+  let slot = slot_index(raw)
+  if slot < p.cold.nparams
+    return p
+  end
+  let fp = locate(toks.raw, 3)
+  let fs = packed_start(fp)
+  let fe = packed_end(fp)
+  let flen = fe - fs else fail "math"
+  if seek_span_buf(p.cold.fnames, toks.raw, fs, flen) < 0
+    return p
+  end
+  let want = seek_span_buf(p.cold.arity, toks.raw, fs, flen)
+  if want < 0
+    return p
+  end
+  let i = 5
+  let code = ""
+  let pcur = p
+  let got = 0
+  let mode = 1
+  while mode == 1
+    if i >= toks.count
+      set mode = 0
+    else
+      let k = tok_kind(toks, i)
+      if k == 7
+        set i = i + 1 else fail "math"
+        set mode = 2
+      else
+        if k == 2
+          let packed = locate(toks.raw, i)
+          let a = packed_start(packed)
+          let b = packed_end(packed)
+          let nlen = b - a else fail "math"
+          if nlen >= 19
+            set mode = 0
+          else
+            let num = span_i64(toks.raw, a, b)
+            set pcur = intern_i64(pcur, num)
+            let ix = seek_i64(pcur.cold.imap, num)
+            if ix < 0
+              fail "const"
+            end
+            set code = code ++ byte(5) ++ u16(ix)
+            set i = i + 1 else fail "math"
+            set got = got + 1 else fail "math"
+          end
+        else
+          if k == 3
+            let lit = tok_text(toks, i)
+            set pcur = intern_bytes(pcur, lit)
+            let sx = seek_buf(pcur.cold.smap, lit)
+            if sx < 0
+              fail "const"
+            end
+            set code = code ++ byte(5) ++ u16(sx)
+            set i = i + 1 else fail "math"
+            set got = got + 1 else fail "math"
+          else
+            if k == 1
+              if tok_is(toks, i + 1 else fail "math", 6)
+                set mode = 0
+              else
+                if tok_is(toks, i + 1 else fail "math", 19)
+                  set mode = 0
+                else
+                  if tok_eq(toks, i, "fail")
+                    set mode = 0
+                  else
+                    if tok_eq(toks, i, "reason")
+                      set mode = 0
+                    else
+                      let nm = tok_text(toks, i)
+                      if has(pcur.cold.slots, nm) == 0
+                        set mode = 0
+                      else
+                        let raws = get(pcur.cold.slots, nm) else fail "unknown name"
+                        set code = code ++ byte(7) ++ u16(slot_index(raws))
+                        set i = i + 1 else fail "math"
+                        set got = got + 1 else fail "math"
+                      end
+                    end
+                  end
+                end
+              end
+            else
+              set mode = 0
+            end
+          end
+        end
+        if mode == 1
+          if tok_is(toks, i, 8)
+            set i = i + 1 else fail "math"
+          else
+            if tok_is(toks, i, 7)
+              set i = i + 1 else fail "math"
+              set mode = 2
+            else
+              set mode = 0
+            end
+          end
+        end
+      end
+    end
+  end
+  if mode != 2
+    return p
+  end
+  if i != toks.count
+    return p
+  end
+  if got != want
+    return p
+  end
+  let idx = seek_span_buf(p.cold.fnames, toks.raw, fs, flen)
+  if idx < 0
+    return p
+  end
+  let rk = seek_span_buf(p.cold.rets, toks.raw, fs, flen)
+  if rk <= 0
+    set rk = 1
+  end
+  let base = pcur
+  if rk != slot_kind(raw)
+    let slots = put(base.cold.slots, name, pack_slot(slot, rk))
+    set base = with_slots(base, slots)
+  end
+  let call = code ++ byte(30) ++ u16(idx)
+  let slotj = base.count + len(call) + 1 else fail "math"
+  let jumps = note(base.jumps, slotj, base.cold.failto)
+  let tail = byte(11) ++ byte(0) ++ byte(0) ++ byte(0) ++ byte(0) ++ byte(6) ++ u16(slot)
+  return tack(base, jumps, call ++ tail)
+end
+
 fn emit_set(p: prog, toks: toks) -> prog
+  let plain = emit_plain_set(p, toks)
+  if plain.count != p.count
+    return plain
+  end
   if toks.count < 4
     fail "expected a name"
   end
@@ -4850,26 +5168,26 @@ fn end_stmt(p: prog) -> prog
     return with_blocks(mark_prog(jumped, top.done), rest)
   end
   if top.kind == 4
-    let tail = after(top.done, "n") else fail "block"
-    let numtext = before(tail, "x") else fail "block"
-    let number_slot = i64(numtext) else fail "block"
-    let pushed = emit_push_slot(p, number_slot)
-    let one = push_i64(pushed, 1)
-    let added = emit_add(one)
-    let popped = emit_pop_slot(added, number_slot)
-    let jumped = emit_rel(popped, 8, top.alt)
-    return with_blocks(mark_prog(jumped, top.done), rest)
+    let tailb = after(top.done, "n") else fail "block"
+    let numtextb = before(tailb, "x") else fail "block"
+    let number_slot = i64(numtextb) else fail "block"
+    let pushedb = emit_push_slot(p, number_slot)
+    let oneb = push_i64(pushedb, 1)
+    let addedb = emit_add(oneb)
+    let poppedb = emit_pop_slot(addedb, number_slot)
+    let jumpedb = emit_rel(poppedb, 8, top.alt)
+    return with_blocks(mark_prog(jumpedb, top.done), rest)
   end
   if top.kind == 5
-    let tail = after(top.done, "m") else fail "block"
-    let numtext = before(tail, "z") else fail "block"
-    let index_slot = i64(numtext) else fail "block"
-    let pushed = emit_push_slot(p, index_slot)
-    let one = push_i64(pushed, 1)
-    let added = emit_add(one)
-    let popped = emit_pop_slot(added, index_slot)
-    let jumped = emit_rel(popped, 8, top.alt)
-    return with_blocks(mark_prog(jumped, top.done), rest)
+    let tailm = after(top.done, "m") else fail "block"
+    let numtextm = before(tailm, "z") else fail "block"
+    let index_slot = i64(numtextm) else fail "block"
+    let pushedm = emit_push_slot(p, index_slot)
+    let onem = push_i64(pushedm, 1)
+    let addedm = emit_add(onem)
+    let poppedm = emit_pop_slot(addedm, index_slot)
+    let jumpedm = emit_rel(poppedm, 8, top.alt)
+    return with_blocks(mark_prog(jumpedm, top.done), rest)
   end
   fail "block"
   return p
@@ -5179,10 +5497,12 @@ end
 
 fn compile(text: bytes) -> prog
   let none: map bytes i64 = map()
-  let seed = fresh("", "", none, none, 7, "")
+  let seed = fresh(bnew(), bnew(), none, none, 7, bnew())
   let typed = scan_fns(scan_structs(seed, text), text)
   let p = fresh(typed.cold.fnames, typed.cold.arity, typed.cold.sname, typed.cold.sfld, typed.cold.nstruct, typed.cold.rets)
+  let seen = 0
   for line in lines(text)
+    set seen = seen + 1 else fail "math"
     set p = on_line(p, line.text)
   end
   if p.cold.live != 0
@@ -5363,7 +5683,7 @@ fn mem_image(p: prog) -> bytes
   set head = poke(head, 216, 512, 8)
   set head = poke(head, 224, pool_off, 8)
   set head = poke(head, 232, funcs_off, 8)
-  return head ++ padded ++ p.cold.pool ++ p.cold.funcs
+  return head ++ padded ++ p.cold.pool ++ bfinish(p.cold.funcs)
 end
 
 fn note(b: buf, slot: i64, name: bytes) -> buf
@@ -5397,6 +5717,81 @@ end
 fn note_bytes(raw: bytes, slot: i64, name: bytes) -> bytes
   let head = q8(slot) ++ u16(len(name))
   return raw ++ head ++ name
+end
+
+fn seek_buf(index: buf, name: bytes) -> i64
+  let n = len(index.parts)
+  let i = 0
+  while i < n
+    let hit = seek_named(at(index.parts, i) else fail "chunk", name)
+    if hit >= 0
+      return hit
+    end
+    set i = i + 1 else fail "math"
+  end
+  return seek_named(index.part, name)
+end
+
+fn seek_span_buf(index: buf, text: bytes, atn: i64, nlen: i64) -> i64
+  let n = len(index.parts)
+  let i = 0
+  while i < n
+    let hit = seek_span(at(index.parts, i) else fail "chunk", text, atn, nlen)
+    if hit >= 0
+      return hit
+    end
+    set i = i + 1 else fail "math"
+  end
+  return seek_span(index.part, text, atn, nlen)
+end
+
+fn seek_span(raw: bytes, text: bytes, atn: i64, nlen: i64) -> i64
+  let i = 0
+  let n = len(raw)
+  while i < n
+    let slot = load_i64(raw, i)
+    let klen = load_u16(raw, i + 8 else fail "math")
+    let kat = i + 10 else fail "math"
+    if klen == nlen
+      if eq_span(raw, kat, text, atn, nlen) != 0
+        return slot
+      end
+    end
+    set i = kat + klen else fail "math"
+  end
+  return -1
+end
+
+fn span_i64(text: bytes, start: i64, stop: i64) -> i64
+  let i = start
+  let neg = 0
+  if i < stop
+    if at(text, i) == 45
+      set neg = 1
+      set i = i + 1 else fail "math"
+    end
+  end
+  if i >= stop
+    fail "bad integer"
+  end
+  let n = 0
+  while i < stop
+    let c = at(text, i) else fail "byte"
+    if c < 48
+      fail "bad integer"
+    end
+    if c > 57
+      fail "bad integer"
+    end
+    let d = c - 48 else fail "math"
+    set n = n * 10 else fail "math"
+    set n = n + d else fail "math"
+    set i = i + 1 else fail "math"
+  end
+  if neg != 0
+    set n = 0 - n else fail "math"
+  end
+  return n
 end
 
 fn seek_named(raw: bytes, name: bytes) -> i64
