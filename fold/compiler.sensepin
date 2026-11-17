@@ -56,19 +56,17 @@ struct block
   done: bytes
 end
 
-struct cold
+struct pack
   code: bytes
   pool: bytes
   nconst: i64
   strs: buf
   funcs: buf
-  marks: buf
   imap: bytes
   bmap: buf
   smap: buf
   fnames: buf
   arity: buf
-  slots: map bytes i64
   unwind: bytes
   main_off: i64
   main_slots: i64
@@ -77,10 +75,6 @@ struct cold
   start: i64
   nparams: i64
   is_main: i64
-  seen: i64
-  parts: list bytes
-  blocks: list block
-  failto: bytes
   pbuf: buf
   sname: map bytes i64
   sfld: map bytes i64
@@ -88,6 +82,16 @@ struct cold
   building: bytes
   nfield: i64
   rets: buf
+end
+
+struct cold
+  pack: pack
+  marks: buf
+  slots: map bytes i64
+  seen: i64
+  parts: list bytes
+  blocks: list block
+  failto: bytes
 end
 
 struct prog
@@ -105,6 +109,31 @@ struct parsed
   pos: i64
   kind: i64
 end
+
+struct jnote
+  rel: i64
+  name: bytes
+end
+
+struct flat
+  prog: prog
+  code: bytes
+  pos: i64
+  kind: i64
+  jumps: list jnote
+  marks: list jnote
+  seen: i64
+end
+
+struct cursor
+  data: bytes
+  off: i64
+  n: i64
+  raw: bytes
+  m: map bytes i64
+  xs: list block
+end
+
 
 fn low8(n: i64) -> i64
   if n == -9223372036854775808
@@ -1016,6 +1045,8 @@ set a = mov_reg_mem(a, 14, 3, 16)
 set a = mov_mem_reg(a, 5, 152, 13)
 set a = mov_mem_reg(a, 5, 160, 14)
 set a = mov_reg_reg(a, 0, 12)
+set a = mov_reg_mem(a, 1, 5, 32)
+set a = add_reg(a, 0, 1)
 set a = shl_reg_imm8(a, 0, 5)
 set a = mov_reg_mem(a, 1, 5, 88)
 set a = add_reg(a, 0, 1)
@@ -3215,32 +3246,33 @@ fn tok_is(toks: toks, pos: i64, kind: i64) -> i64
 end
 
 fn spawn(code: bytes, pool: bytes, nconst: i64, strs: buf, funcs: buf, jumps: buf, marks: buf, imap: bytes, bmap: buf, smap: buf, fnames: buf, arity: buf, slots: map bytes i64, unwind: bytes, main_off: i64, main_slots: i64, saw_main: i64, live: i64, start: i64, nparams: i64, is_main: i64, seen: i64, cbuf: buf, blocks: list block, failto: bytes, pbuf: buf, sname: map bytes i64, sfld: map bytes i64, nstruct: i64, building: bytes, nfield: i64, rets: buf) -> prog
-  let held = cold(code, pool, nconst, strs, funcs, marks, imap, bmap, smap, fnames, arity, slots, unwind, main_off, main_slots, saw_main, live, start, nparams, is_main, seen, cbuf.parts, blocks, failto, pbuf, sname, sfld, nstruct, building, nfield, rets)
+  let pk = pack(code, pool, nconst, strs, funcs, imap, bmap, smap, fnames, arity, unwind, main_off, main_slots, saw_main, live, start, nparams, is_main, pbuf, sname, sfld, nstruct, building, nfield, rets)
+  let held = cold(pk, marks, slots, seen, cbuf.parts, blocks, failto)
   return prog(cbuf.part, cbuf.fills, cbuf.count, jumps, held, cbuf.mid, cbuf.mfills)
 end
 
 fn with_code(p: prog, code: bytes) -> prog
-  return spawn(code, p.cold.pool, p.cold.nconst, p.cold.strs, p.cold.funcs, p.jumps, p.cold.marks, p.cold.imap, p.cold.bmap, p.cold.smap, p.cold.fnames, p.cold.arity, p.cold.slots, p.cold.unwind, p.cold.main_off, p.cold.main_slots, p.cold.saw_main, p.cold.live, p.cold.start, p.cold.nparams, p.cold.is_main, p.cold.seen, as_buf(p), p.cold.blocks, p.cold.failto, p.cold.pbuf, p.cold.sname, p.cold.sfld, p.cold.nstruct, p.cold.building, p.cold.nfield, p.cold.rets)
+  return spawn(code, p.cold.pack.pool, p.cold.pack.nconst, p.cold.pack.strs, p.cold.pack.funcs, p.jumps, p.cold.marks, p.cold.pack.imap, p.cold.pack.bmap, p.cold.pack.smap, p.cold.pack.fnames, p.cold.pack.arity, p.cold.slots, p.cold.pack.unwind, p.cold.pack.main_off, p.cold.pack.main_slots, p.cold.pack.saw_main, p.cold.pack.live, p.cold.pack.start, p.cold.pack.nparams, p.cold.pack.is_main, p.cold.seen, as_buf(p), p.cold.blocks, p.cold.failto, p.cold.pack.pbuf, p.cold.pack.sname, p.cold.pack.sfld, p.cold.pack.nstruct, p.cold.pack.building, p.cold.pack.nfield, p.cold.pack.rets)
 end
 
 fn with_cbuf(p: prog, cbuf: buf) -> prog
-  return spawn(p.cold.code, p.cold.pool, p.cold.nconst, p.cold.strs, p.cold.funcs, p.jumps, p.cold.marks, p.cold.imap, p.cold.bmap, p.cold.smap, p.cold.fnames, p.cold.arity, p.cold.slots, p.cold.unwind, p.cold.main_off, p.cold.main_slots, p.cold.saw_main, p.cold.live, p.cold.start, p.cold.nparams, p.cold.is_main, p.cold.seen, cbuf, p.cold.blocks, p.cold.failto, p.cold.pbuf, p.cold.sname, p.cold.sfld, p.cold.nstruct, p.cold.building, p.cold.nfield, p.cold.rets)
+  return spawn(p.cold.pack.code, p.cold.pack.pool, p.cold.pack.nconst, p.cold.pack.strs, p.cold.pack.funcs, p.jumps, p.cold.marks, p.cold.pack.imap, p.cold.pack.bmap, p.cold.pack.smap, p.cold.pack.fnames, p.cold.pack.arity, p.cold.slots, p.cold.pack.unwind, p.cold.pack.main_off, p.cold.pack.main_slots, p.cold.pack.saw_main, p.cold.pack.live, p.cold.pack.start, p.cold.pack.nparams, p.cold.pack.is_main, p.cold.seen, cbuf, p.cold.blocks, p.cold.failto, p.cold.pack.pbuf, p.cold.pack.sname, p.cold.pack.sfld, p.cold.pack.nstruct, p.cold.pack.building, p.cold.pack.nfield, p.cold.pack.rets)
 end
 
 fn with_jumps(p: prog, jumps: buf) -> prog
-  return spawn(p.cold.code, p.cold.pool, p.cold.nconst, p.cold.strs, p.cold.funcs, jumps, p.cold.marks, p.cold.imap, p.cold.bmap, p.cold.smap, p.cold.fnames, p.cold.arity, p.cold.slots, p.cold.unwind, p.cold.main_off, p.cold.main_slots, p.cold.saw_main, p.cold.live, p.cold.start, p.cold.nparams, p.cold.is_main, p.cold.seen, as_buf(p), p.cold.blocks, p.cold.failto, p.cold.pbuf, p.cold.sname, p.cold.sfld, p.cold.nstruct, p.cold.building, p.cold.nfield, p.cold.rets)
+  return spawn(p.cold.pack.code, p.cold.pack.pool, p.cold.pack.nconst, p.cold.pack.strs, p.cold.pack.funcs, jumps, p.cold.marks, p.cold.pack.imap, p.cold.pack.bmap, p.cold.pack.smap, p.cold.pack.fnames, p.cold.pack.arity, p.cold.slots, p.cold.pack.unwind, p.cold.pack.main_off, p.cold.pack.main_slots, p.cold.pack.saw_main, p.cold.pack.live, p.cold.pack.start, p.cold.pack.nparams, p.cold.pack.is_main, p.cold.seen, as_buf(p), p.cold.blocks, p.cold.failto, p.cold.pack.pbuf, p.cold.pack.sname, p.cold.pack.sfld, p.cold.pack.nstruct, p.cold.pack.building, p.cold.pack.nfield, p.cold.pack.rets)
 end
 
 fn with_code_jumps(p: prog, code: bytes, jumps: buf) -> prog
-  return spawn(code, p.cold.pool, p.cold.nconst, p.cold.strs, p.cold.funcs, jumps, p.cold.marks, p.cold.imap, p.cold.bmap, p.cold.smap, p.cold.fnames, p.cold.arity, p.cold.slots, p.cold.unwind, p.cold.main_off, p.cold.main_slots, p.cold.saw_main, p.cold.live, p.cold.start, p.cold.nparams, p.cold.is_main, p.cold.seen, as_buf(p), p.cold.blocks, p.cold.failto, p.cold.pbuf, p.cold.sname, p.cold.sfld, p.cold.nstruct, p.cold.building, p.cold.nfield, p.cold.rets)
+  return spawn(code, p.cold.pack.pool, p.cold.pack.nconst, p.cold.pack.strs, p.cold.pack.funcs, jumps, p.cold.marks, p.cold.pack.imap, p.cold.pack.bmap, p.cold.pack.smap, p.cold.pack.fnames, p.cold.pack.arity, p.cold.slots, p.cold.pack.unwind, p.cold.pack.main_off, p.cold.pack.main_slots, p.cold.pack.saw_main, p.cold.pack.live, p.cold.pack.start, p.cold.pack.nparams, p.cold.pack.is_main, p.cold.seen, as_buf(p), p.cold.blocks, p.cold.failto, p.cold.pack.pbuf, p.cold.pack.sname, p.cold.pack.sfld, p.cold.pack.nstruct, p.cold.pack.building, p.cold.pack.nfield, p.cold.pack.rets)
 end
 
 fn with_pool_i(p: prog, pbuf: buf, nconst: i64, imap: bytes) -> prog
-  return spawn(p.cold.code, p.cold.pool, nconst, p.cold.strs, p.cold.funcs, p.jumps, p.cold.marks, imap, p.cold.bmap, p.cold.smap, p.cold.fnames, p.cold.arity, p.cold.slots, p.cold.unwind, p.cold.main_off, p.cold.main_slots, p.cold.saw_main, p.cold.live, p.cold.start, p.cold.nparams, p.cold.is_main, p.cold.seen, as_buf(p), p.cold.blocks, p.cold.failto, pbuf, p.cold.sname, p.cold.sfld, p.cold.nstruct, p.cold.building, p.cold.nfield, p.cold.rets)
+  return spawn(p.cold.pack.code, p.cold.pack.pool, nconst, p.cold.pack.strs, p.cold.pack.funcs, p.jumps, p.cold.marks, imap, p.cold.pack.bmap, p.cold.pack.smap, p.cold.pack.fnames, p.cold.pack.arity, p.cold.slots, p.cold.pack.unwind, p.cold.pack.main_off, p.cold.pack.main_slots, p.cold.pack.saw_main, p.cold.pack.live, p.cold.pack.start, p.cold.pack.nparams, p.cold.pack.is_main, p.cold.seen, as_buf(p), p.cold.blocks, p.cold.failto, pbuf, p.cold.pack.sname, p.cold.pack.sfld, p.cold.pack.nstruct, p.cold.pack.building, p.cold.pack.nfield, p.cold.pack.rets)
 end
 
 fn with_pool_b(p: prog, pbuf: buf, nconst: i64, strs: buf, bmap: buf, smap: buf) -> prog
-  return spawn(p.cold.code, p.cold.pool, nconst, strs, p.cold.funcs, p.jumps, p.cold.marks, p.cold.imap, bmap, smap, p.cold.fnames, p.cold.arity, p.cold.slots, p.cold.unwind, p.cold.main_off, p.cold.main_slots, p.cold.saw_main, p.cold.live, p.cold.start, p.cold.nparams, p.cold.is_main, p.cold.seen, as_buf(p), p.cold.blocks, p.cold.failto, pbuf, p.cold.sname, p.cold.sfld, p.cold.nstruct, p.cold.building, p.cold.nfield, p.cold.rets)
+  return spawn(p.cold.pack.code, p.cold.pack.pool, nconst, strs, p.cold.pack.funcs, p.jumps, p.cold.marks, p.cold.pack.imap, bmap, smap, p.cold.pack.fnames, p.cold.pack.arity, p.cold.slots, p.cold.pack.unwind, p.cold.pack.main_off, p.cold.pack.main_slots, p.cold.pack.saw_main, p.cold.pack.live, p.cold.pack.start, p.cold.pack.nparams, p.cold.pack.is_main, p.cold.seen, as_buf(p), p.cold.blocks, p.cold.failto, pbuf, p.cold.pack.sname, p.cold.pack.sfld, p.cold.pack.nstruct, p.cold.pack.building, p.cold.pack.nfield, p.cold.pack.rets)
 end
 
 
@@ -3252,14 +3284,14 @@ fn fresh(fnames: buf, arity: buf, sname: map bytes i64, sfld: map bytes i64, nst
 end
 
 fn enter_fn(p: prog, name: bytes, slots: map bytes i64) -> prog
-  let nparams = seek_buf(p.cold.arity, name)
+  let nparams = seek_buf(p.cold.pack.arity, name)
   if nparams < 0
     fail "missing fn"
   end
   let is_main = eqb(name, "main")
   let unwind = "u" ++ p.cold.seen
   let blocks: list block = list()
-  return spawn(p.cold.code, p.cold.pool, p.cold.nconst, p.cold.strs, p.cold.funcs, p.jumps, p.cold.marks, p.cold.imap, p.cold.bmap, p.cold.smap, p.cold.fnames, p.cold.arity, slots, unwind, p.cold.main_off, p.cold.main_slots, p.cold.saw_main, 1, p.count, nparams, is_main, p.cold.seen, as_buf(p), blocks, unwind, p.cold.pbuf, p.cold.sname, p.cold.sfld, p.cold.nstruct, p.cold.building, p.cold.nfield, p.cold.rets)
+  return spawn(p.cold.pack.code, p.cold.pack.pool, p.cold.pack.nconst, p.cold.pack.strs, p.cold.pack.funcs, p.jumps, p.cold.marks, p.cold.pack.imap, p.cold.pack.bmap, p.cold.pack.smap, p.cold.pack.fnames, p.cold.pack.arity, slots, unwind, p.cold.pack.main_off, p.cold.pack.main_slots, p.cold.pack.saw_main, 1, p.count, nparams, is_main, p.cold.seen, as_buf(p), blocks, unwind, p.cold.pack.pbuf, p.cold.pack.sname, p.cold.pack.sfld, p.cold.pack.nstruct, p.cold.pack.building, p.cold.pack.nfield, p.cold.pack.rets)
 end
 
 fn close_fn(p: prog) -> prog
@@ -3267,29 +3299,29 @@ fn close_fn(p: prog) -> prog
     fail "unclosed block"
   end
   let cur = p
-  if p.cold.is_main != 0
+  if p.cold.pack.is_main != 0
     set cur = take_code(cur, byte(0))
   end
-  let marks = note(cur.cold.marks, cur.count, cur.cold.unwind)
+  let marks = note(cur.cold.marks, cur.count, cur.cold.pack.unwind)
   set cur = take_code(cur, byte(29))
-  if cur.cold.is_main != 0
+  if cur.cold.pack.is_main != 0
     set cur = take_code(cur, byte(2))
   end
-  if cur.cold.is_main == 0
+  if cur.cold.pack.is_main == 0
     set cur = take_code(cur, byte(32))
   end
   let nlocals = len(cur.cold.slots)
-  let rec = q8(cur.cold.start) ++ q8(cur.cold.nparams) ++ q8(nlocals)
-  let funcs = badd(cur.cold.funcs, rec)
-  let main_off = cur.cold.main_off
-  let main_slots = cur.cold.main_slots
-  let saw = cur.cold.saw_main
-  if cur.cold.is_main != 0
-    set main_off = cur.cold.start
+  let rec = q8(cur.cold.pack.start) ++ q8(cur.cold.pack.nparams) ++ q8(nlocals)
+  let funcs = badd(cur.cold.pack.funcs, rec)
+  let main_off = cur.cold.pack.main_off
+  let main_slots = cur.cold.pack.main_slots
+  let saw = cur.cold.pack.saw_main
+  if cur.cold.pack.is_main != 0
+    set main_off = cur.cold.pack.start
     set main_slots = nlocals
     set saw = 1
   end
-  return spawn(p.cold.code, p.cold.pool, p.cold.nconst, p.cold.strs, funcs, p.jumps, marks, p.cold.imap, p.cold.bmap, p.cold.smap, p.cold.fnames, p.cold.arity, p.cold.slots, p.cold.unwind, main_off, main_slots, saw, 0, p.cold.start, p.cold.nparams, p.cold.is_main, cur.cold.seen + 1 else fail "math", as_buf(cur), cur.cold.blocks, cur.cold.failto, cur.cold.pbuf, cur.cold.sname, cur.cold.sfld, cur.cold.nstruct, cur.cold.building, cur.cold.nfield, cur.cold.rets)
+  return spawn(p.cold.pack.code, p.cold.pack.pool, p.cold.pack.nconst, p.cold.pack.strs, funcs, p.jumps, marks, p.cold.pack.imap, p.cold.pack.bmap, p.cold.pack.smap, p.cold.pack.fnames, p.cold.pack.arity, p.cold.slots, p.cold.pack.unwind, main_off, main_slots, saw, 0, p.cold.pack.start, p.cold.pack.nparams, p.cold.pack.is_main, cur.cold.seen + 1 else fail "math", as_buf(cur), cur.cold.blocks, cur.cold.failto, cur.cold.pack.pbuf, cur.cold.pack.sname, cur.cold.pack.sfld, cur.cold.pack.nstruct, cur.cold.pack.building, cur.cold.pack.nfield, cur.cold.pack.rets)
 end
 
 fn as_buf(p: prog) -> buf
@@ -3297,7 +3329,7 @@ fn as_buf(p: prog) -> buf
 end
 
 fn cold_parts(h: cold, parts: list bytes) -> cold
-  return cold(h.code, h.pool, h.nconst, h.strs, h.funcs, h.marks, h.imap, h.bmap, h.smap, h.fnames, h.arity, h.slots, h.unwind, h.main_off, h.main_slots, h.saw_main, h.live, h.start, h.nparams, h.is_main, h.seen, parts, h.blocks, h.failto, h.pbuf, h.sname, h.sfld, h.nstruct, h.building, h.nfield, h.rets)
+  return cold(h.pack, h.marks, h.slots, h.seen, parts, h.blocks, h.failto)
 end
 
 fn tack(p: prog, jumps: buf, extra: bytes) -> prog
@@ -3346,18 +3378,18 @@ fn emit_push_slot(p: prog, slot: i64) -> prog
 end
 
 fn intern_i64(p: prog, n: i64) -> prog
-  if seek_i64(p.cold.imap, n) >= 0
+  if seek_i64(p.cold.pack.imap, n) >= 0
     return p
   end
   let rec = pool_rec(0, n, 0, 0)
-  let pbuf = badd(p.cold.pbuf, rec)
-  let imap = p.cold.imap ++ q8(n) ++ q8(p.cold.nconst)
-  return with_pool_i(p, pbuf, p.cold.nconst + 1 else fail "math", imap)
+  let pbuf = badd(p.cold.pack.pbuf, rec)
+  let imap = p.cold.pack.imap ++ q8(n) ++ q8(p.cold.pack.nconst)
+  return with_pool_i(p, pbuf, p.cold.pack.nconst + 1 else fail "math", imap)
 end
 
 fn push_i64(p: prog, n: i64) -> prog
   let q = intern_i64(p, n)
-  let idx = seek_i64(q.cold.imap, n)
+  let idx = seek_i64(q.cold.pack.imap, n)
   if idx < 0
     fail "const"
   end
@@ -3365,26 +3397,26 @@ fn push_i64(p: prog, n: i64) -> prog
 end
 
 fn intern_bytes(p: prog, data: bytes) -> prog
-  if seek_buf(p.cold.smap, data) >= 0
+  if seek_buf(p.cold.pack.smap, data) >= 0
     return p
   end
-  let off = seek_buf(p.cold.bmap, data)
-  let strs = p.cold.strs
-  let bmap = p.cold.bmap
+  let off = seek_buf(p.cold.pack.bmap, data)
+  let strs = p.cold.pack.strs
+  let bmap = p.cold.pack.bmap
   if off < 0
-    set off = p.cold.strs.count
-    set strs = badd(p.cold.strs, data)
-    set bmap = badd(p.cold.bmap, q8(off) ++ u16(len(data)) ++ data)
+    set off = p.cold.pack.strs.count
+    set strs = badd(p.cold.pack.strs, data)
+    set bmap = badd(p.cold.pack.bmap, q8(off) ++ u16(len(data)) ++ data)
   end
   let rec = pool_rec(257, off, len(data), 0)
-  let pbuf = badd(p.cold.pbuf, rec)
-  let smap = badd(p.cold.smap, q8(p.cold.nconst) ++ u16(len(data)) ++ data)
-  return with_pool_b(p, pbuf, p.cold.nconst + 1 else fail "math", strs, bmap, smap)
+  let pbuf = badd(p.cold.pack.pbuf, rec)
+  let smap = badd(p.cold.pack.smap, q8(p.cold.pack.nconst) ++ u16(len(data)) ++ data)
+  return with_pool_b(p, pbuf, p.cold.pack.nconst + 1 else fail "math", strs, bmap, smap)
 end
 
 fn push_bytes(p: prog, data: bytes) -> prog
   let q = intern_bytes(p, data)
-  let idx = seek_buf(q.cold.smap, data)
+  let idx = seek_buf(q.cold.pack.smap, data)
   if idx < 0
     fail "const"
   end
@@ -3420,8 +3452,16 @@ fn push_local(p: prog, name: bytes) -> prog
   return take_code(p, byte(7) ++ u16(slot))
 end
 
+fn made(p: prog, pos: i64, kind: i64) -> parsed
+  return parsed(p, pos, kind)
+end
+
+fn made_block(kind: i64, alt: bytes, done: bytes) -> block
+  return block(kind, alt, done)
+end
+
 fn do_dec(cur: parsed) -> parsed
-  return parsed(take_code(cur.prog, byte(34)), cur.pos, 2)
+  return made(take_code(cur.prog, byte(34)), cur.pos, 2)
 end
 
 fn emit_add(p: prog) -> prog
@@ -3448,11 +3488,11 @@ fn id_text(n: i64) -> bytes
 end
 
 fn with_row(p: prog, sname: map bytes i64, sfld: map bytes i64, nstruct: i64, building: bytes, nfield: i64, live: i64) -> prog
-  return spawn(p.cold.code, p.cold.pool, p.cold.nconst, p.cold.strs, p.cold.funcs, p.jumps, p.cold.marks, p.cold.imap, p.cold.bmap, p.cold.smap, p.cold.fnames, p.cold.arity, p.cold.slots, p.cold.unwind, p.cold.main_off, p.cold.main_slots, p.cold.saw_main, live, p.cold.start, p.cold.nparams, p.cold.is_main, p.cold.seen, as_buf(p), p.cold.blocks, p.cold.failto, p.cold.pbuf, sname, sfld, nstruct, building, nfield, p.cold.rets)
+  return spawn(p.cold.pack.code, p.cold.pack.pool, p.cold.pack.nconst, p.cold.pack.strs, p.cold.pack.funcs, p.jumps, p.cold.marks, p.cold.pack.imap, p.cold.pack.bmap, p.cold.pack.smap, p.cold.pack.fnames, p.cold.pack.arity, p.cold.slots, p.cold.pack.unwind, p.cold.pack.main_off, p.cold.pack.main_slots, p.cold.pack.saw_main, live, p.cold.pack.start, p.cold.pack.nparams, p.cold.pack.is_main, p.cold.seen, as_buf(p), p.cold.blocks, p.cold.failto, p.cold.pack.pbuf, sname, sfld, nstruct, building, nfield, p.cold.pack.rets)
 end
 
 fn with_fns(p: prog, fnames: buf, arity: buf, rets: buf) -> prog
-  return spawn(p.cold.code, p.cold.pool, p.cold.nconst, p.cold.strs, p.cold.funcs, p.jumps, p.cold.marks, p.cold.imap, p.cold.bmap, p.cold.smap, fnames, arity, p.cold.slots, p.cold.unwind, p.cold.main_off, p.cold.main_slots, p.cold.saw_main, p.cold.live, p.cold.start, p.cold.nparams, p.cold.is_main, p.cold.seen, as_buf(p), p.cold.blocks, p.cold.failto, p.cold.pbuf, p.cold.sname, p.cold.sfld, p.cold.nstruct, p.cold.building, p.cold.nfield, rets)
+  return spawn(p.cold.pack.code, p.cold.pack.pool, p.cold.pack.nconst, p.cold.pack.strs, p.cold.pack.funcs, p.jumps, p.cold.marks, p.cold.pack.imap, p.cold.pack.bmap, p.cold.pack.smap, fnames, arity, p.cold.slots, p.cold.pack.unwind, p.cold.pack.main_off, p.cold.pack.main_slots, p.cold.pack.saw_main, p.cold.pack.live, p.cold.pack.start, p.cold.pack.nparams, p.cold.pack.is_main, p.cold.seen, as_buf(p), p.cold.blocks, p.cold.failto, p.cold.pack.pbuf, p.cold.pack.sname, p.cold.pack.sfld, p.cold.pack.nstruct, p.cold.pack.building, p.cold.pack.nfield, rets)
 end
 
 fn read_type(p: prog, toks: toks, pos: i64) -> parsed
@@ -3464,15 +3504,15 @@ fn read_type(p: prog, toks: toks, pos: i64) -> parsed
   end
   let name = tok_text(toks, pos)
   if eqb(name, "i64")
-    return parsed(p, pos + 1 else fail "math", 1)
+    return made(p, pos + 1 else fail "math", 1)
   end
   if eqb(name, "bytes")
-    return parsed(p, pos + 1 else fail "math", 2)
+    return made(p, pos + 1 else fail "math", 2)
   end
   if eqb(name, "list")
     let inner = read_type(p, toks, pos + 1 else fail "math")
     let k = 1000 + inner.kind else fail "math"
-    return parsed(p, inner.pos, k)
+    return made(p, inner.pos, k)
   end
   if eqb(name, "map")
     let key = read_type(p, toks, pos + 1 else fail "math")
@@ -3480,13 +3520,13 @@ fn read_type(p: prog, toks: toks, pos: i64) -> parsed
     let scaled = key.kind * 1000 else fail "math"
     let body = 2000 + scaled else fail "math"
     let mk = body + val.kind else fail "math"
-    return parsed(p, val.pos, mk)
+    return made(p, val.pos, mk)
   end
-  if has(p.cold.sname, name) == 0
+  if has(p.cold.pack.sname, name) == 0
     fail "type"
   end
-  let packed = get(p.cold.sname, name) else fail "type"
-  return parsed(p, pos + 1 else fail "math", slot_index(packed))
+  let packed = get(p.cold.pack.sname, name) else fail "type"
+  return made(p, pos + 1 else fail "math", slot_index(packed))
 end
 
 fn note_field(p: prog, toks: toks) -> prog
@@ -3504,14 +3544,14 @@ fn note_field(p: prog, toks: toks) -> prog
   if typed.pos != toks.count
     fail "extra tokens"
   end
-  let slash = id_text(p.cold.nstruct) ++ "/" ++ name
-  if has(p.cold.sfld, slash)
+  let slash = id_text(p.cold.pack.nstruct) ++ "/" ++ name
+  if has(p.cold.pack.sfld, slash)
     fail "duplicate field"
   end
-  let dot = id_text(p.cold.nstruct) ++ "." ++ id_text(p.cold.nfield)
-  let sfld = put(p.cold.sfld, slash, pack_slot(p.cold.nfield, typed.kind))
+  let dot = id_text(p.cold.pack.nstruct) ++ "." ++ id_text(p.cold.pack.nfield)
+  let sfld = put(p.cold.pack.sfld, slash, pack_slot(p.cold.pack.nfield, typed.kind))
   set sfld = put(sfld, dot, typed.kind)
-  return with_row(p, p.cold.sname, sfld, p.cold.nstruct, p.cold.building, p.cold.nfield + 1 else fail "math", p.cold.live)
+  return with_row(p, p.cold.pack.sname, sfld, p.cold.pack.nstruct, p.cold.pack.building, p.cold.pack.nfield + 1 else fail "math", p.cold.pack.live)
 end
 
 fn leading_is(text: bytes, word: bytes) -> i64
@@ -3600,13 +3640,13 @@ fn scan_structs(p: prog, text: bytes) -> prog
               if toks.count != 1
                 fail "extra tokens"
               end
-              if cur.cold.nfield == 0
+              if cur.cold.pack.nfield == 0
                 fail "struct needs a field"
               end
-              let packed = pack_slot(cur.cold.nstruct, cur.cold.nfield)
-              let sname = put(cur.cold.sname, cur.cold.building, packed)
-              let nxt = cur.cold.nstruct + 1 else fail "math"
-              set cur = with_row(cur, sname, cur.cold.sfld, nxt, "", 0, 0)
+              let packed = pack_slot(cur.cold.pack.nstruct, cur.cold.pack.nfield)
+              let sname = put(cur.cold.pack.sname, cur.cold.pack.building, packed)
+              let nxt = cur.cold.pack.nstruct + 1 else fail "math"
+              set cur = with_row(cur, sname, cur.cold.pack.sfld, nxt, "", 0, 0)
               set mode = 0
             else
               set cur = note_field(cur, toks)
@@ -3620,10 +3660,10 @@ fn scan_structs(p: prog, text: bytes) -> prog
                 fail "expected a struct name"
               end
               let name = tok_text(toks, 1)
-              if has(cur.cold.sname, name)
+              if has(cur.cold.pack.sname, name)
                 fail "duplicate struct"
               end
-              set cur = with_row(cur, cur.cold.sname, cur.cold.sfld, cur.cold.nstruct, name, 0, 0)
+              set cur = with_row(cur, cur.cold.pack.sname, cur.cold.pack.sfld, cur.cold.pack.nstruct, name, 0, 0)
               set mode = 2
             end
           end
@@ -3650,9 +3690,9 @@ fn arrow_type(p: prog, toks: toks) -> i64
 end
 
 fn scan_fns(p: prog, text: bytes) -> prog
-  let fnames = p.cold.fnames
-  let arity = p.cold.arity
-  let rets = p.cold.rets
+  let fnames = p.cold.pack.fnames
+  let arity = p.cold.pack.arity
+  let rets = p.cold.pack.rets
   let count = 0
   for line in lines(text)
     if leading_is(line.text, "fn")
@@ -3695,10 +3735,10 @@ fn take_fields(cur: parsed, toks: toks) -> parsed
     let field = tok_text(toks, out.pos + 1 else fail "math")
     if out.kind == 3
       if eqb(field, "text")
-        set out = parsed(take_code(out.prog, byte(28)), out.pos + 2 else fail "math", 2)
+        set out = made(take_code(out.prog, byte(28)), out.pos + 2 else fail "math", 2)
       else
         if eqb(field, "n")
-          set out = parsed(take_code(out.prog, byte(27)), out.pos + 2 else fail "math", 1)
+          set out = made(take_code(out.prog, byte(27)), out.pos + 2 else fail "math", 1)
         else
           fail "field"
         end
@@ -3711,12 +3751,12 @@ fn take_fields(cur: parsed, toks: toks) -> parsed
         fail "field"
       end
       let key = id_text(out.kind) ++ "/" ++ field
-      if has(out.prog.cold.sfld, key) == 0
+      if has(out.prog.cold.pack.sfld, key) == 0
         fail "field"
       end
-      let packed = get(out.prog.cold.sfld, key) else fail "field"
+      let packed = get(out.prog.cold.pack.sfld, key) else fail "field"
       let coded = take_code(out.prog, byte(51) ++ u16(slot_index(packed)))
-      set out = parsed(coded, out.pos + 2 else fail "math", slot_kind(packed))
+      set out = made(coded, out.pos + 2 else fail "math", slot_kind(packed))
     end
   end
   return out
@@ -3729,25 +3769,25 @@ fn parse_atom(p: prog, toks: toks, pos: i64) -> parsed
   let kind = tok_kind(toks, pos)
   if kind == 2
     let nxt = push_i64(p, tok_num(toks, pos))
-    return parsed(nxt, pos + 1 else fail "math", 1)
+    return made(nxt, pos + 1 else fail "math", 1)
   end
   if kind == 3
     let nxt2 = push_bytes(p, tok_text(toks, pos))
-    return parsed(nxt2, pos + 1 else fail "math", 2)
+    return made(nxt2, pos + 1 else fail "math", 2)
   end
   if kind == 6
     let inner = parse_expr(p, toks, pos + 1 else fail "math")
     if tok_is(toks, inner.pos, 7) == 0
       fail "expected )"
     end
-    return take_fields(parsed(inner.prog, inner.pos + 1 else fail "math", inner.kind), toks)
+    return take_fields(made(inner.prog, inner.pos + 1 else fail "math", inner.kind), toks)
   end
   if kind == 1
     if eqb(tok_text(toks, pos), "fail")
       return parse_fail_expr(p, toks, pos)
     end
     if eqb(tok_text(toks, pos), "reason")
-      return parsed(take_code(p, byte(29)), pos + 1 else fail "math", 2)
+      return made(take_code(p, byte(29)), pos + 1 else fail "math", 2)
     end
     if tok_is(toks, pos + 1 else fail "math", 6)
       return take_fields(parse_call(p, toks, pos), toks)
@@ -3755,7 +3795,7 @@ fn parse_atom(p: prog, toks: toks, pos: i64) -> parsed
     let nxt3 = push_local(p, tok_text(toks, pos))
     let raw = get(p.cold.slots, tok_text(toks, pos)) else fail "unknown name"
     let sk = slot_kind(raw)
-    return take_fields(parsed(nxt3, pos + 1 else fail "math", sk), toks)
+    return take_fields(made(nxt3, pos + 1 else fail "math", sk), toks)
   end
   if kind == 11
     let unary = parse_atom(p, toks, pos + 1 else fail "math")
@@ -3763,10 +3803,10 @@ fn parse_atom(p: prog, toks: toks, pos: i64) -> parsed
       fail "type"
     end
     let negated = emit_iffail(take_code(unary.prog, byte(17)))
-    return parsed(negated, unary.pos, 1)
+    return made(negated, unary.pos, 1)
   end
   fail "bad expression"
-  return parsed(p, pos, 0)
+  return made(p, pos, 0)
 end
 
 fn parse_argc(p: prog, toks: toks, pos: i64) -> parsed
@@ -3776,7 +3816,7 @@ fn parse_argc(p: prog, toks: toks, pos: i64) -> parsed
   if tok_is(toks, pos + 2 else fail "math", 7) == 0
     fail "arity"
   end
-  return parsed(take_code(p, byte(21)), pos + 3 else fail "math", 1)
+  return made(take_code(p, byte(21)), pos + 3 else fail "math", 1)
 end
 
 fn parse_one(p: prog, toks: toks, pos: i64, want: i64, op: i64, outk: i64) -> parsed
@@ -3791,7 +3831,7 @@ fn parse_one(p: prog, toks: toks, pos: i64, want: i64, op: i64, outk: i64) -> pa
     fail "expected )"
   end
   let done = emit_iffail(take_code(cur.prog, byte(op)))
-  return parsed(done, cur.pos + 1 else fail "math", outk)
+  return made(done, cur.pos + 1 else fail "math", outk)
 end
 
 fn parse_arg(p: prog, toks: toks, pos: i64) -> parsed
@@ -3826,7 +3866,7 @@ fn parse_len(p: prog, toks: toks, pos: i64) -> parsed
     fail "type"
   end
   let done = emit_iffail(take_code(cur.prog, byte(op)))
-  return parsed(done, cur.pos + 1 else fail "math", 1)
+  return made(done, cur.pos + 1 else fail "math", 1)
 end
 
 fn parse_open(p: prog, toks: toks, pos: i64) -> parsed
@@ -3869,7 +3909,7 @@ fn parse_open(p: prog, toks: toks, pos: i64) -> parsed
     fail "expected )"
   end
   let done = emit_iffail(take_code(a5.prog, byte(23)))
-  return parsed(done, a5.pos + 1 else fail "math", 2)
+  return made(done, a5.pos + 1 else fail "math", 2)
 end
 
 fn parse_call(p: prog, toks: toks, pos: i64) -> parsed
@@ -3928,13 +3968,13 @@ fn parse_call(p: prog, toks: toks, pos: i64) -> parsed
   if eqb(name, "has")
     return parse_has(p, toks, pos)
   end
-  if has(p.cold.sname, name)
+  if has(p.cold.pack.sname, name)
     return parse_struct_call(p, toks, pos, name)
   end
-  if seek_buf(p.cold.fnames, name) < 0
+  if seek_buf(p.cold.pack.fnames, name) < 0
     fail "unknown function"
   end
-  let want = seek_buf(p.cold.arity, name)
+  let want = seek_buf(p.cold.pack.arity, name)
   if want < 0
     fail "arity"
   end
@@ -3953,7 +3993,7 @@ fn parse_call(p: prog, toks: toks, pos: i64) -> parsed
     if k == 2
       let num = tok_num(toks, i)
       set pcur = intern_i64(pcur, num)
-      let ix = seek_i64(pcur.cold.imap, num)
+      let ix = seek_i64(pcur.cold.pack.imap, num)
       if ix < 0
         fail "const"
       end
@@ -3965,7 +4005,7 @@ fn parse_call(p: prog, toks: toks, pos: i64) -> parsed
     if k == 3
       let lit = tok_text(toks, i)
       set pcur = intern_bytes(pcur, lit)
-      let sx = seek_buf(pcur.cold.smap, lit)
+      let sx = seek_buf(pcur.cold.pack.smap, lit)
       if sx < 0
         fail "const"
       end
@@ -4023,10 +4063,10 @@ fn parse_call(p: prog, toks: toks, pos: i64) -> parsed
                       fail "field"
                     end
                     let key = id_text(sk) ++ "/" ++ field
-                    if has(pcur.cold.sfld, key) == 0
+                    if has(pcur.cold.pack.sfld, key) == 0
                       fail "field"
                     end
-                    let packed = get(pcur.cold.sfld, key) else fail "field"
+                    let packed = get(pcur.cold.pack.sfld, key) else fail "field"
                     set code = code ++ byte(51) ++ u16(slot_index(packed))
                     set sk = slot_kind(packed)
                   end
@@ -4075,7 +4115,7 @@ fn parse_call(p: prog, toks: toks, pos: i64) -> parsed
       end
     end
   end
-  let cur = parsed(p, i, 1)
+  let cur = made(p, i, 1)
   if mode != 2
     set code = ""
     set pcur = p
@@ -4101,7 +4141,7 @@ fn parse_call(p: prog, toks: toks, pos: i64) -> parsed
   if got != want
     fail "arity"
   end
-  let idx = seek_buf(p.cold.fnames, name)
+  let idx = seek_buf(p.cold.pack.fnames, name)
   if idx < 0
     fail "unknown function"
   end
@@ -4112,14 +4152,14 @@ fn parse_call(p: prog, toks: toks, pos: i64) -> parsed
   let called = take_code(base, code ++ byte(30) ++ u16(idx))
   let failed = emit_iffail(called)
   let rk = 1
-  let rkfound = seek_buf(p.cold.rets, name)
+  let rkfound = seek_buf(p.cold.pack.rets, name)
   if rkfound >= 0
     set rk = rkfound
   end
   if rk == 0
     set rk = 1
   end
-  return parsed(failed, i, rk)
+  return made(failed, i, rk)
 end
 
 fn parse_pair(p: prog, toks: toks, pos: i64, op: i64, outk: i64) -> parsed
@@ -4141,7 +4181,7 @@ fn parse_pair(p: prog, toks: toks, pos: i64, op: i64, outk: i64) -> parsed
     fail "expected )"
   end
   let done = emit_iffail(take_code(a2.prog, byte(op)))
-  return parsed(done, a2.pos + 1 else fail "math", outk)
+  return made(done, a2.pos + 1 else fail "math", outk)
 end
 
 fn product_op(toks: toks, pos: i64) -> i64
@@ -4166,7 +4206,7 @@ fn parse_product(p: prog, toks: toks, pos: i64) -> parsed
       fail "type"
     end
     let done = emit_iffail(take_code(right.prog, byte(op)))
-    set cur = parsed(done, right.pos, 1)
+    set cur = made(done, right.pos, 1)
     set op = product_op(toks, cur.pos)
   end
   return cur
@@ -4189,7 +4229,7 @@ fn parse_list(p: prog, toks: toks, pos: i64) -> parsed
   let i = pos + 2 else fail "math"
   if tok_is(toks, i, 7)
     let done = take_code(p, byte(46) ++ u16(0))
-    return parsed(done, i + 1 else fail "math", 0)
+    return made(done, i + 1 else fail "math", 0)
   end
   let cur = parse_expr(p, toks, i)
   if cur.kind == 0
@@ -4209,7 +4249,7 @@ fn parse_list(p: prog, toks: toks, pos: i64) -> parsed
   end
   let built = take_code(cur.prog, byte(46) ++ u16(count))
   let kind = 1000 + elem else fail "math"
-  return parsed(built, cur.pos + 1 else fail "math", kind)
+  return made(built, cur.pos + 1 else fail "math", kind)
 end
 
 fn parse_map_lit(p: prog, toks: toks, pos: i64) -> parsed
@@ -4219,7 +4259,7 @@ fn parse_map_lit(p: prog, toks: toks, pos: i64) -> parsed
   let i = pos + 2 else fail "math"
   if tok_is(toks, i, 7)
     let done = take_code(p, byte(52) ++ u16(0))
-    return parsed(done, i + 1 else fail "math", 0)
+    return made(done, i + 1 else fail "math", 0)
   end
   let key = parse_expr(p, toks, i)
   if key.kind == 0
@@ -4257,7 +4297,7 @@ fn parse_map_lit(p: prog, toks: toks, pos: i64) -> parsed
   let scaled = kk * 1000 else fail "math"
   let body = 2000 + scaled else fail "math"
   let kind = body + vk else fail "math"
-  return parsed(built, cur.pos + 1 else fail "math", kind)
+  return made(built, cur.pos + 1 else fail "math", kind)
 end
 
 fn parse_push(p: prog, toks: toks, pos: i64) -> parsed
@@ -4283,7 +4323,7 @@ fn parse_push(p: prog, toks: toks, pos: i64) -> parsed
     fail "expected )"
   end
   let done = take_code(a2.prog, byte(47))
-  return parsed(done, a2.pos + 1 else fail "math", a1.kind)
+  return made(done, a2.pos + 1 else fail "math", a1.kind)
 end
 
 fn parse_put(p: prog, toks: toks, pos: i64) -> parsed
@@ -4316,7 +4356,7 @@ fn parse_put(p: prog, toks: toks, pos: i64) -> parsed
     fail "expected )"
   end
   let done = take_code(a3.prog, byte(53))
-  return parsed(done, a3.pos + 1 else fail "math", a1.kind)
+  return made(done, a3.pos + 1 else fail "math", a1.kind)
 end
 
 fn parse_get(p: prog, toks: toks, pos: i64) -> parsed
@@ -4342,7 +4382,7 @@ fn parse_get(p: prog, toks: toks, pos: i64) -> parsed
   let scaled = kk * 1000 else fail "math"
   let vk = span - scaled else fail "math"
   let done = emit_iffail(take_code(a2.prog, byte(54)))
-  return parsed(done, a2.pos + 1 else fail "math", vk)
+  return made(done, a2.pos + 1 else fail "math", vk)
 end
 
 fn parse_has(p: prog, toks: toks, pos: i64) -> parsed
@@ -4366,11 +4406,11 @@ fn parse_has(p: prog, toks: toks, pos: i64) -> parsed
     fail "expected )"
   end
   let done = take_code(a2.prog, byte(55))
-  return parsed(done, a2.pos + 1 else fail "math", 1)
+  return made(done, a2.pos + 1 else fail "math", 1)
 end
 
 fn parse_struct_call(p: prog, toks: toks, pos: i64, name: bytes) -> parsed
-  let packed = get(p.cold.sname, name) else fail "type"
+  let packed = get(p.cold.pack.sname, name) else fail "type"
   let id = slot_index(packed)
   let nfields = slot_kind(packed)
   if tok_is(toks, pos + 1 else fail "math", 6) == 0
@@ -4430,10 +4470,10 @@ fn parse_struct_call(p: prog, toks: toks, pos: i64, name: bytes) -> parsed
                   fail "field"
                 end
                 let key = id_text(sk) ++ "/" ++ field
-                if has(pcur.cold.sfld, key) == 0
+                if has(pcur.cold.pack.sfld, key) == 0
                   fail "field"
                 end
-                let fp = get(pcur.cold.sfld, key) else fail "field"
+                let fp = get(pcur.cold.pack.sfld, key) else fail "field"
                 set code = code ++ byte(51) ++ u16(slot_index(fp))
                 set sk = slot_kind(fp)
               end
@@ -4447,7 +4487,7 @@ fn parse_struct_call(p: prog, toks: toks, pos: i64, name: bytes) -> parsed
       set mode = 0
     end
     if took
-      let need = get(p.cold.sfld, id_text(id) ++ "." ++ id_text(got)) else fail "field"
+      let need = get(p.cold.pack.sfld, id_text(id) ++ "." ++ id_text(got)) else fail "field"
       if sk != need
         fail "type"
       end
@@ -4473,20 +4513,20 @@ fn parse_struct_call(p: prog, toks: toks, pos: i64, name: bytes) -> parsed
       fail "arity"
     end
     let built = take_code(pcur, code ++ byte(50) ++ u16(nfields))
-    return parsed(built, i, id)
+    return made(built, i, id)
   end
-  let cur = parsed(p, pos + 2 else fail "math", 0)
+  let cur = made(p, pos + 2 else fail "math", 0)
   set got = 0
   if tok_is(toks, cur.pos, 7) == 0
     set cur = parse_expr(p, toks, cur.pos)
     set got = 1
-    let want = get(p.cold.sfld, id_text(id) ++ "." ++ id_text(0)) else fail "field"
+    let want = get(p.cold.pack.sfld, id_text(id) ++ "." ++ id_text(0)) else fail "field"
     if cur.kind != want
       fail "type"
     end
     while tok_is(toks, cur.pos, 8)
       set cur = parse_expr(cur.prog, toks, cur.pos + 1 else fail "math")
-      let need2 = get(p.cold.sfld, id_text(id) ++ "." ++ id_text(got)) else fail "field"
+      let need2 = get(p.cold.pack.sfld, id_text(id) ++ "." ++ id_text(got)) else fail "field"
       if cur.kind != need2
         fail "type"
       end
@@ -4500,7 +4540,7 @@ fn parse_struct_call(p: prog, toks: toks, pos: i64, name: bytes) -> parsed
     fail "arity"
   end
   let slow = take_code(cur.prog, byte(50) ++ u16(nfields))
-  return parsed(slow, cur.pos + 1 else fail "math", id)
+  return made(slow, cur.pos + 1 else fail "math", id)
 end
 
 fn parse_at(p: prog, toks: toks, pos: i64) -> parsed
@@ -4533,7 +4573,7 @@ fn parse_at(p: prog, toks: toks, pos: i64) -> parsed
     fail "expected )"
   end
   let done = emit_iffail(take_code(a2.prog, byte(op)))
-  return parsed(done, a2.pos + 1 else fail "math", outk)
+  return made(done, a2.pos + 1 else fail "math", outk)
 end
 
 fn parse_set_byte(p: prog, toks: toks, pos: i64) -> parsed
@@ -4562,7 +4602,7 @@ fn parse_set_byte(p: prog, toks: toks, pos: i64) -> parsed
     fail "expected )"
   end
   let done = emit_iffail(take_code(a3.prog, byte(10)))
-  return parsed(done, a3.pos + 1 else fail "math", 2)
+  return made(done, a3.pos + 1 else fail "math", 2)
 end
 
 fn parse_save(p: prog, toks: toks, pos: i64) -> parsed
@@ -4584,7 +4624,7 @@ fn parse_save(p: prog, toks: toks, pos: i64) -> parsed
     fail "expected )"
   end
   let done = emit_iffail(take_code(a2.prog, byte(4)))
-  return parsed(done, a2.pos + 1 else fail "math", 1)
+  return made(done, a2.pos + 1 else fail "math", 1)
 end
 
 fn parse_sum(p: prog, toks: toks, pos: i64) -> parsed
@@ -4599,7 +4639,7 @@ fn parse_sum(p: prog, toks: toks, pos: i64) -> parsed
       fail "type"
     end
     let added = emit_iffail(take_code(right.prog, byte(op)))
-    set cur = parsed(added, right.pos, 1)
+    set cur = made(added, right.pos, 1)
     set op = sum_op(toks, cur.pos)
   end
   return cur
@@ -4607,6 +4647,10 @@ end
 
 
 fn emit_return(p: prog, toks: toks) -> prog
+  let fast = emit_return_fast(p, toks)
+  if fast.count != p.count
+    return fast
+  end
   let cur = parse_expr(p, toks, 1)
   if cur.pos != toks.count
     fail "extra tokens"
@@ -4615,6 +4659,10 @@ fn emit_return(p: prog, toks: toks) -> prog
 end
 
 fn emit_write(p: prog, toks: toks) -> prog
+  let fast = emit_write_fast(p, toks)
+  if fast.count != p.count
+    return fast
+  end
   let cur = parse_expr(p, toks, 1)
   if cur.pos != toks.count
     fail "extra tokens"
@@ -4644,24 +4692,27 @@ fn bind_params(p: prog, toks: toks) -> map bytes i64
   return slots
 end
 
+fn hold(p: prog, held: cold) -> prog
+  return prog(p.part, p.fills, p.count, p.jumps, held, p.mid, p.mfills)
+end
 fn with_marks(p: prog, marks: buf) -> prog
-  return spawn(p.cold.code, p.cold.pool, p.cold.nconst, p.cold.strs, p.cold.funcs, p.jumps, marks, p.cold.imap, p.cold.bmap, p.cold.smap, p.cold.fnames, p.cold.arity, p.cold.slots, p.cold.unwind, p.cold.main_off, p.cold.main_slots, p.cold.saw_main, p.cold.live, p.cold.start, p.cold.nparams, p.cold.is_main, p.cold.seen, as_buf(p), p.cold.blocks, p.cold.failto, p.cold.pbuf, p.cold.sname, p.cold.sfld, p.cold.nstruct, p.cold.building, p.cold.nfield, p.cold.rets)
+  return hold(p, cold(p.cold.pack, marks, p.cold.slots, p.cold.seen, p.cold.parts, p.cold.blocks, p.cold.failto))
 end
 
 fn with_slots(p: prog, slots: map bytes i64) -> prog
-  return spawn(p.cold.code, p.cold.pool, p.cold.nconst, p.cold.strs, p.cold.funcs, p.jumps, p.cold.marks, p.cold.imap, p.cold.bmap, p.cold.smap, p.cold.fnames, p.cold.arity, slots, p.cold.unwind, p.cold.main_off, p.cold.main_slots, p.cold.saw_main, p.cold.live, p.cold.start, p.cold.nparams, p.cold.is_main, p.cold.seen, as_buf(p), p.cold.blocks, p.cold.failto, p.cold.pbuf, p.cold.sname, p.cold.sfld, p.cold.nstruct, p.cold.building, p.cold.nfield, p.cold.rets)
+  return hold(p, cold(p.cold.pack, p.cold.marks, slots, p.cold.seen, p.cold.parts, p.cold.blocks, p.cold.failto))
 end
 
 fn with_seen(p: prog, seen: i64) -> prog
-  return spawn(p.cold.code, p.cold.pool, p.cold.nconst, p.cold.strs, p.cold.funcs, p.jumps, p.cold.marks, p.cold.imap, p.cold.bmap, p.cold.smap, p.cold.fnames, p.cold.arity, p.cold.slots, p.cold.unwind, p.cold.main_off, p.cold.main_slots, p.cold.saw_main, p.cold.live, p.cold.start, p.cold.nparams, p.cold.is_main, seen, as_buf(p), p.cold.blocks, p.cold.failto, p.cold.pbuf, p.cold.sname, p.cold.sfld, p.cold.nstruct, p.cold.building, p.cold.nfield, p.cold.rets)
+  return hold(p, cold(p.cold.pack, p.cold.marks, p.cold.slots, seen, p.cold.parts, p.cold.blocks, p.cold.failto))
 end
 
 fn with_failto(p: prog, failto: bytes) -> prog
-  return spawn(p.cold.code, p.cold.pool, p.cold.nconst, p.cold.strs, p.cold.funcs, p.jumps, p.cold.marks, p.cold.imap, p.cold.bmap, p.cold.smap, p.cold.fnames, p.cold.arity, p.cold.slots, p.cold.unwind, p.cold.main_off, p.cold.main_slots, p.cold.saw_main, p.cold.live, p.cold.start, p.cold.nparams, p.cold.is_main, p.cold.seen, as_buf(p), p.cold.blocks, failto, p.cold.pbuf, p.cold.sname, p.cold.sfld, p.cold.nstruct, p.cold.building, p.cold.nfield, p.cold.rets)
+  return hold(p, cold(p.cold.pack, p.cold.marks, p.cold.slots, p.cold.seen, p.cold.parts, p.cold.blocks, failto))
 end
 
 fn with_blocks(p: prog, blocks: list block) -> prog
-  return spawn(p.cold.code, p.cold.pool, p.cold.nconst, p.cold.strs, p.cold.funcs, p.jumps, p.cold.marks, p.cold.imap, p.cold.bmap, p.cold.smap, p.cold.fnames, p.cold.arity, p.cold.slots, p.cold.unwind, p.cold.main_off, p.cold.main_slots, p.cold.saw_main, p.cold.live, p.cold.start, p.cold.nparams, p.cold.is_main, p.cold.seen, as_buf(p), blocks, p.cold.failto, p.cold.pbuf, p.cold.sname, p.cold.sfld, p.cold.nstruct, p.cold.building, p.cold.nfield, p.cold.rets)
+  return hold(p, cold(p.cold.pack, p.cold.marks, p.cold.slots, p.cold.seen, p.cold.parts, blocks, p.cold.failto))
 end
 
 fn drop_last(xs: list block) -> list block
@@ -4743,10 +4794,10 @@ fn parse_fail_expr(p: prog, toks: toks, pos: i64) -> parsed
     set shown = do_dec(msg)
   end
   let op = 32
-  if p.cold.is_main != 0
+  if p.cold.pack.is_main != 0
     set op = 2
   end
-  return parsed(take_code(shown.prog, byte(op)), shown.pos, 0)
+  return made(take_code(shown.prog, byte(op)), shown.pos, 0)
 end
 
 fn parse_cmp(p: prog, toks: toks, pos: i64) -> parsed
@@ -4764,7 +4815,7 @@ fn parse_cmp(p: prog, toks: toks, pos: i64) -> parsed
   let right = parse_sum(cur.prog, toks, cur.pos + 1 else fail "math")
   let code = k - 13 else fail "math"
   let cmpd = take_code(right.prog, byte(18) ++ byte(code))
-  return parsed(cmpd, right.pos, 1)
+  return made(cmpd, right.pos, 1)
 end
 
 fn parse_concat(p: prog, toks: toks, pos: i64) -> parsed
@@ -4779,7 +4830,7 @@ fn parse_concat(p: prog, toks: toks, pos: i64) -> parsed
       set rhs = do_dec(right)
     end
     let cat = emit_cat(rhs.prog)
-    set cur = parsed(cat, rhs.pos, 2)
+    set cur = made(cat, rhs.pos, 2)
   end
   return cur
 end
@@ -4816,10 +4867,1237 @@ fn parse_expr(p: prog, toks: toks, pos: i64) -> parsed
       end
     end
   end
-  return parsed(finished, right.pos, kind)
+  return made(finished, right.pos, kind)
+end
+
+fn z4() -> bytes
+  let pair = byte(0) ++ byte(0)
+  return pair ++ pair
+end
+
+fn flat_no(p: prog, pos: i64, seen: i64) -> flat
+  let none: list jnote = list()
+  return flat(p, "", pos, -1, none, none, seen)
+end
+
+fn shift_notes(xs: list jnote, delta: i64) -> list jnote
+  let out: list jnote = list()
+  let i = 0
+  let n = len(xs)
+  while i < n
+    let jn = at(xs, i) else fail "block"
+    let moved = jn.rel + delta else fail "math"
+    set out = push(out, jnote(moved, jn.name))
+    set i = i + 1 else fail "math"
+  end
+  return out
+end
+
+fn join_notes(left: list jnote, right: list jnote) -> list jnote
+  let out = left
+  let i = 0
+  let n = len(right)
+  while i < n
+    let jn = at(right, i) else fail "block"
+    set out = push(out, jn)
+    set i = i + 1 else fail "math"
+  end
+  return out
+end
+
+fn emit_flat(prog: prog, code: bytes, pos: i64, kind: i64, jumps: list jnote, marks: list jnote, seen: i64) -> flat
+  return flat(prog, code, pos, kind, jumps, marks, seen)
+end
+
+fn atom_base(toks: toks, pos: i64) -> i64
+  if pos >= toks.count
+    return 0
+  end
+  let k = tok_kind(toks, pos)
+  if k == 2
+    return 1
+  end
+  if k == 3
+    return 1
+  end
+  if k == 1
+    if tok_eq(toks, pos, "fail")
+      return 0
+    end
+    if tok_eq(toks, pos, "reason")
+      return 1
+    end
+    let nxt = pos + 1 else fail "math"
+    if tok_is(toks, nxt, 6)
+      return 0
+    end
+    if tok_is(toks, nxt, 19)
+      return 0
+    end
+    return 1
+  end
+  return 0
+end
+
+fn has_op(toks: toks, pos: i64, level: i64) -> i64
+  if level >= 1
+    if product_op(toks, pos) != 0
+      return 1
+    end
+  end
+  if level >= 2
+    if sum_op(toks, pos) != 0
+      return 1
+    end
+  end
+  if level >= 3
+    let k = 0
+    if pos < toks.count
+      set k = tok_kind(toks, pos)
+    end
+    if k >= 13
+      if k <= 18
+        return 1
+      end
+    end
+  end
+  if level >= 4
+    if tok_is(toks, pos, 5)
+      return 1
+    end
+  end
+  return 0
+end
+
+fn arg_simple(toks: toks, pos: i64) -> i64
+  if atom_base(toks, pos) == 0
+    return 0
+  end
+  let nxt = pos + 1 else fail "math"
+  if tok_is(toks, nxt, 8)
+    return 1
+  end
+  if tok_is(toks, nxt, 7)
+    return 1
+  end
+  return 0
+end
+
+fn rhs_simple(toks: toks, pos: i64, level: i64) -> i64
+  if atom_base(toks, pos) == 0
+    return 0
+  end
+  let nxt = pos + 1 else fail "math"
+  if has_op(toks, nxt, level)
+    return 0
+  end
+  return 1
+end
+
+fn paint_atom(p: prog, toks: toks, pos: i64, seen: i64) -> flat
+  let none: list jnote = list()
+  let pk = tok_kind(toks, pos)
+  if pk == 2
+    let num = tok_num(toks, pos)
+    let nxt = intern_i64(p, num)
+    let ix = seek_i64(nxt.cold.pack.imap, num)
+    if ix < 0
+      fail "const"
+    end
+    return emit_flat(nxt, byte(5) ++ u16(ix), pos + 1 else fail "math", 1, none, none, seen)
+  end
+  if pk == 3
+    let lit = tok_text(toks, pos)
+    let nxt2 = intern_bytes(p, lit)
+    let sx = seek_buf(nxt2.cold.pack.smap, lit)
+    if sx < 0
+      fail "const"
+    end
+    return emit_flat(nxt2, byte(5) ++ u16(sx), pos + 1 else fail "math", 2, none, none, seen)
+  end
+  if pk == 1
+    if tok_eq(toks, pos, "reason")
+      return emit_flat(p, byte(29), pos + 1 else fail "math", 2, none, none, seen)
+    end
+    let nm = tok_text(toks, pos)
+    if has(p.cold.slots, nm) == 0
+      fail "unknown name"
+    end
+    let raw = get(p.cold.slots, nm) else fail "unknown name"
+    return emit_flat(p, byte(7) ++ u16(slot_index(raw)), pos + 1 else fail "math", slot_kind(raw), none, none, seen)
+  end
+  fail "bad expression"
+  return flat_no(p, pos, seen)
+end
+
+fn flat_call(p: prog, toks: toks, pos: i64, name: bytes, failto: bytes, seen: i64) -> flat
+  if tok_is(toks, pos + 1 else fail "math", 6) == 0
+    fail "expected ("
+  end
+  let prog = p
+  let code = ""
+  let atp = pos + 2 else fail "math"
+  let none: list jnote = list()
+  let jumps = none
+  let marks = none
+  let sn = seen
+  let got = 0
+  let k0 = 0
+  let k1 = 0
+  let closed = 0
+  let wi = 0
+  if tok_is(toks, atp, 7)
+    set atp = atp + 1 else fail "math"
+    set closed = 1
+  end
+  while closed == 0
+    let want = -1
+    if eqb(name, "arg")
+      set want = 1
+    end
+    if eqb(name, "i64")
+      set want = 2
+    end
+    if eqb(name, "byte")
+      set want = 1
+    end
+    if eqb(name, "before")
+      set want = 2
+    end
+    if eqb(name, "after")
+      set want = 2
+    end
+    if eqb(name, "holds")
+      set want = 2
+    end
+    if eqb(name, "save")
+      set want = 2
+    end
+    if eqb(name, "set_byte")
+      if wi == 0
+        set want = 2
+      end
+      if wi > 0
+        set want = 1
+      end
+    end
+    if eqb(name, "open")
+      set want = 2
+      if wi == 1
+        set want = 1
+      end
+    end
+    if eqb(name, "at")
+      if wi == 1
+        set want = 1
+      end
+    end
+    if eqb(name, "has")
+      if wi >= 1
+        let span_k = k0 - 2000 else fail "math"
+        set want = span_k / 1000 else fail "math"
+      end
+    end
+    if eqb(name, "get")
+      if wi >= 1
+        let span_g = k0 - 2000 else fail "math"
+        set want = span_g / 1000 else fail "math"
+      end
+    end
+    if eqb(name, "put")
+      if wi == 1
+        let span_p = k0 - 2000 else fail "math"
+        set want = span_p / 1000 else fail "math"
+      end
+      if wi >= 2
+        let span_q = k0 - 2000 else fail "math"
+        let pkey = span_q / 1000 else fail "math"
+        let pscaled = pkey * 1000 else fail "math"
+        set want = span_q - pscaled else fail "math"
+      end
+    end
+    if eqb(name, "push")
+      if wi >= 1
+        set want = k0 - 1000 else fail "math"
+      end
+    end
+    if eqb(name, "list")
+      if wi >= 1
+        set want = k0
+      end
+    end
+    if eqb(name, "map")
+      if wi >= 2
+        let pair = wi / 2 else fail "math"
+        let tw = pair * 2 else fail "math"
+        if tw == wi
+          set want = k0
+        end
+        if tw != wi
+          set want = k1
+        end
+      end
+    end
+    if has(p.cold.pack.sname, name)
+      let packed = get(p.cold.pack.sname, name) else fail "type"
+      let idn = slot_index(packed)
+      let key = id_text(idn) ++ "." ++ id_text(wi)
+      set want = get(p.cold.pack.sfld, key) else fail "field"
+    end
+    let akind = 0
+    if arg_simple(toks, atp)
+      let pk = tok_kind(toks, atp)
+      if pk == 2
+        let num = tok_num(toks, atp)
+        set prog = intern_i64(prog, num)
+        let ix = seek_i64(prog.cold.pack.imap, num)
+        if ix < 0
+          fail "const"
+        end
+        set code = code ++ byte(5) ++ u16(ix)
+        set akind = 1
+      end
+      if pk == 3
+        let lit = tok_text(toks, atp)
+        set prog = intern_bytes(prog, lit)
+        let sx = seek_buf(prog.cold.pack.smap, lit)
+        if sx < 0
+          fail "const"
+        end
+        set code = code ++ byte(5) ++ u16(sx)
+        set akind = 2
+      end
+      if pk == 1
+        if tok_eq(toks, atp, "reason")
+          set code = code ++ byte(29)
+          set akind = 2
+        else
+          let anm = tok_text(toks, atp)
+          if has(prog.cold.slots, anm) == 0
+            fail "unknown name"
+          end
+          let araw = get(prog.cold.slots, anm) else fail "unknown name"
+          set code = code ++ byte(7) ++ u16(slot_index(araw))
+          set akind = slot_kind(araw)
+        end
+      end
+      set atp = atp + 1 else fail "math"
+    else
+      let piece = flat_expr(prog, toks, atp, failto, sn)
+      if piece.kind < 0
+        return piece
+      end
+      let shift = len(code)
+      set jumps = join_notes(jumps, shift_notes(piece.jumps, shift))
+      set marks = join_notes(marks, shift_notes(piece.marks, shift))
+      set code = code ++ piece.code
+      set prog = piece.prog
+      set atp = piece.pos
+      set sn = piece.seen
+      set akind = piece.kind
+    end
+    if want >= 0
+      if akind != want
+        fail "type"
+      end
+    end
+    if eqb(name, "list")
+      if akind == 0
+        fail "type"
+      end
+    end
+    if eqb(name, "map")
+      if akind == 0
+        fail "type"
+      end
+    end
+    if wi == 0
+      set k0 = akind
+      if eqb(name, "has")
+        if k0 < 2000
+          fail "type"
+        end
+      end
+      if eqb(name, "get")
+        if k0 < 2000
+          fail "type"
+        end
+      end
+      if eqb(name, "put")
+        if k0 < 2000
+          fail "type"
+        end
+      end
+      if eqb(name, "push")
+        if k0 < 1000
+          fail "type"
+        end
+        if k0 >= 2000
+          fail "type"
+        end
+      end
+    end
+    if wi == 1
+      set k1 = akind
+    end
+    set got = got + 1 else fail "math"
+    set wi = wi + 1 else fail "math"
+    if tok_is(toks, atp, 7)
+      set atp = atp + 1 else fail "math"
+      set closed = 1
+    else
+      if tok_is(toks, atp, 8) == 0
+        fail "expected ,"
+      end
+      set atp = atp + 1 else fail "math"
+    end
+  end
+  let tail = ""
+  let outk = 0
+  let iff = 0
+  let done = 0
+  if eqb(name, "argc")
+    if got != 0
+      fail "arity"
+    end
+    set tail = byte(21)
+    set outk = 1
+    set done = 1
+  end
+  if eqb(name, "arg")
+    if got != 1
+      fail "arity"
+    end
+    set tail = byte(22)
+    set outk = 2
+    set iff = 1
+    set done = 1
+  end
+  if eqb(name, "i64")
+    if got != 1
+      fail "arity"
+    end
+    set tail = byte(20)
+    set outk = 1
+    set iff = 1
+    set done = 1
+  end
+  if eqb(name, "byte")
+    if got != 1
+      fail "arity"
+    end
+    set tail = byte(3)
+    set outk = 2
+    set iff = 1
+    set done = 1
+  end
+  if eqb(name, "len")
+    if got != 1
+      fail "arity"
+    end
+    set outk = 1
+    set iff = 1
+    if k0 == 2
+      set tail = byte(25)
+    end
+    if k0 >= 1000
+      if k0 < 2000
+        set tail = byte(49)
+      end
+    end
+    if k0 >= 2000
+      set tail = byte(56)
+    end
+    if len(tail) == 0
+      fail "type"
+    end
+    set done = 1
+  end
+  if eqb(name, "before")
+    if got != 2
+      fail "arity"
+    end
+    set tail = byte(35)
+    set outk = 2
+    set iff = 1
+    set done = 1
+  end
+  if eqb(name, "after")
+    if got != 2
+      fail "arity"
+    end
+    set tail = byte(36)
+    set outk = 2
+    set iff = 1
+    set done = 1
+  end
+  if eqb(name, "holds")
+    if got != 2
+      fail "arity"
+    end
+    set tail = byte(37)
+    set outk = 1
+    set iff = 1
+    set done = 1
+  end
+  if eqb(name, "at")
+    if got != 2
+      fail "arity"
+    end
+    set outk = 1
+    set iff = 1
+    if k0 == 2
+      set tail = byte(24)
+    end
+    if k0 >= 1000
+      if k0 < 2000
+        set tail = byte(48)
+        set outk = k0 - 1000 else fail "math"
+      end
+    end
+    if len(tail) == 0
+      fail "type"
+    end
+    set done = 1
+  end
+  if eqb(name, "set_byte")
+    if got != 3
+      fail "arity"
+    end
+    set tail = byte(10)
+    set outk = 2
+    set iff = 1
+    set done = 1
+  end
+  if eqb(name, "save")
+    if got != 2
+      fail "arity"
+    end
+    set tail = byte(4)
+    set outk = 1
+    set iff = 1
+    set done = 1
+  end
+  if eqb(name, "open")
+    if got != 5
+      fail "arity"
+    end
+    set tail = byte(23)
+    set outk = 2
+    set iff = 1
+    set done = 1
+  end
+  if eqb(name, "has")
+    if got != 2
+      fail "arity"
+    end
+    set tail = byte(55)
+    set outk = 1
+    set done = 1
+  end
+  if eqb(name, "get")
+    if got != 2
+      fail "arity"
+    end
+    let span_v = k0 - 2000 else fail "math"
+    let keyk = span_v / 1000 else fail "math"
+    let scaled_v = keyk * 1000 else fail "math"
+    set outk = span_v - scaled_v else fail "math"
+    set tail = byte(54)
+    set iff = 1
+    set done = 1
+  end
+  if eqb(name, "put")
+    if got != 3
+      fail "arity"
+    end
+    set tail = byte(53)
+    set outk = k0
+    set done = 1
+  end
+  if eqb(name, "push")
+    if got != 2
+      fail "arity"
+    end
+    set tail = byte(47)
+    set outk = k0
+    set done = 1
+  end
+  if eqb(name, "list")
+    if got == 0
+      set tail = byte(46) ++ u16(0)
+      set outk = 0
+    end
+    if got != 0
+      set tail = byte(46) ++ u16(got)
+      set outk = 1000 + k0 else fail "math"
+    end
+    set done = 1
+  end
+  if eqb(name, "map")
+    if got == 0
+      set tail = byte(52) ++ u16(0)
+      set outk = 0
+    end
+    if got != 0
+      let pairs = got / 2 else fail "math"
+      let even = pairs * 2 else fail "math"
+      if even != got
+        fail "arity"
+      end
+      let scaled_m = k0 * 1000 else fail "math"
+      set outk = 2000 + scaled_m else fail "math"
+      set outk = outk + k1 else fail "math"
+      set tail = byte(52) ++ u16(pairs)
+    end
+    set done = 1
+  end
+  if done == 0
+    if has(p.cold.pack.sname, name)
+      let spacked = get(p.cold.pack.sname, name) else fail "type"
+      let sid = slot_index(spacked)
+      let nfields = slot_kind(spacked)
+      if got != nfields
+        fail "arity"
+      end
+      set tail = byte(50) ++ u16(nfields)
+      set outk = sid
+      set done = 1
+    end
+  end
+  if done == 0
+    let idx = seek_buf(p.cold.pack.fnames, name)
+    if idx < 0
+      fail "unknown function"
+    end
+    let need = seek_buf(p.cold.pack.arity, name)
+    if need < 0
+      fail "arity"
+    end
+    if got != need
+      fail "arity"
+    end
+    let rkfound = seek_buf(p.cold.pack.rets, name)
+    let rk = 1
+    if rkfound >= 0
+      set rk = rkfound
+    end
+    if rk == 0
+      set rk = 1
+    end
+    set tail = byte(30) ++ u16(idx)
+    set outk = rk
+    set iff = 1
+    set done = 1
+  end
+  if iff != 0
+    let callb = code ++ tail
+    let orel = len(callb) + 1 else fail "math"
+    set code = callb ++ byte(11) ++ z4()
+    set jumps = push(jumps, jnote(orel, failto))
+  end
+  if iff == 0
+    set code = code ++ tail
+  end
+  while tok_is(toks, atp, 19)
+    if tok_is(toks, atp + 1 else fail "math", 1) == 0
+      fail "field"
+    end
+    let field = tok_text(toks, atp + 1 else fail "math")
+    if outk == 3
+      if eqb(field, "text")
+        set code = code ++ byte(28)
+        set outk = 2
+      else
+        if eqb(field, "n")
+          set code = code ++ byte(27)
+          set outk = 1
+        else
+          fail "field"
+        end
+      end
+    else
+      if outk < 7
+        fail "field"
+      end
+      if outk >= 1000
+        fail "field"
+      end
+      let fkey = id_text(outk) ++ "/" ++ field
+      if has(prog.cold.pack.sfld, fkey) == 0
+        fail "field"
+      end
+      let fp = get(prog.cold.pack.sfld, fkey) else fail "field"
+      set code = code ++ byte(51) ++ u16(slot_index(fp))
+      set outk = slot_kind(fp)
+    end
+    set atp = atp + 2 else fail "math"
+  end
+  return emit_flat(prog, code, atp, outk, jumps, marks, sn)
+end
+
+fn flat_parse(p: prog, toks: toks, pos: i64, failto: bytes, seen: i64, level: i64) -> flat
+  let prog = p
+  let code = ""
+  let atp = pos
+  let kind = 0
+  let sn = seen
+  let none: list jnote = list()
+  let jumps = none
+  let marks = none
+  let allow_dot = 0
+  if pos >= toks.count
+    fail "expected expression"
+  end
+  let kt = tok_kind(toks, pos)
+  if kt == 11
+    let unary = flat_parse(prog, toks, pos + 1 else fail "math", failto, sn, 0)
+    if unary.kind < 0
+      return unary
+    end
+    if unary.kind != 1
+      fail "type"
+    end
+    let ucall = unary.code ++ byte(17)
+    let urel = len(ucall) + 1 else fail "math"
+    set code = ucall ++ byte(11) ++ z4()
+    set jumps = push(unary.jumps, jnote(urel, failto))
+    set marks = unary.marks
+    set prog = unary.prog
+    set atp = unary.pos
+    set sn = unary.seen
+    set kind = 1
+  else
+    if kt == 6
+      let inner = flat_expr(prog, toks, pos + 1 else fail "math", failto, sn)
+      if inner.kind < 0
+        return inner
+      end
+      if tok_is(toks, inner.pos, 7) == 0
+        fail "expected )"
+      end
+      set prog = inner.prog
+      set code = inner.code
+      set jumps = inner.jumps
+      set marks = inner.marks
+      set atp = inner.pos + 1 else fail "math"
+      set sn = inner.seen
+      set kind = inner.kind
+      set allow_dot = 1
+    else
+      if kt == 1
+        if tok_eq(toks, pos, "fail")
+          let msg = flat_parse(prog, toks, pos + 1 else fail "math", failto, sn, 4)
+          if msg.kind < 0
+            return msg
+          end
+          let mcode = msg.code
+          if msg.kind == 1
+            set mcode = mcode ++ byte(34)
+          end
+          let fop = 32
+          if p.cold.pack.is_main != 0
+            set fop = 2
+          end
+          set mcode = mcode ++ byte(fop)
+          return emit_flat(msg.prog, mcode, msg.pos, 0, msg.jumps, msg.marks, msg.seen)
+        end
+        if tok_eq(toks, pos, "reason")
+          set code = byte(29)
+          set atp = pos + 1 else fail "math"
+          set kind = 2
+        else
+          if tok_is(toks, pos + 1 else fail "math", 6)
+            let cnm = tok_text(toks, pos)
+            let called = flat_call(prog, toks, pos, cnm, failto, sn)
+            if called.kind < 0
+              return called
+            end
+            if has_op(toks, called.pos, level) == 0
+              return called
+            end
+            set prog = called.prog
+            set code = called.code
+            set jumps = called.jumps
+            set marks = called.marks
+            set atp = called.pos
+            set sn = called.seen
+            set kind = called.kind
+          else
+            let nm = tok_text(toks, pos)
+            if has(prog.cold.slots, nm) == 0
+              fail "unknown name"
+            end
+            let raw = get(prog.cold.slots, nm) else fail "unknown name"
+            set code = byte(7) ++ u16(slot_index(raw))
+            set kind = slot_kind(raw)
+            set atp = pos + 1 else fail "math"
+            set allow_dot = 1
+          end
+        end
+      else
+        if kt == 2
+          let num = tok_num(toks, pos)
+          set prog = intern_i64(prog, num)
+          let ix = seek_i64(prog.cold.pack.imap, num)
+          if ix < 0
+            fail "const"
+          end
+          set code = byte(5) ++ u16(ix)
+          set kind = 1
+          set atp = pos + 1 else fail "math"
+        else
+          if kt == 3
+            let lit = tok_text(toks, pos)
+            set prog = intern_bytes(prog, lit)
+            let sx = seek_buf(prog.cold.pack.smap, lit)
+            if sx < 0
+              fail "const"
+            end
+            set code = byte(5) ++ u16(sx)
+            set kind = 2
+            set atp = pos + 1 else fail "math"
+          else
+            fail "bad expression"
+          end
+        end
+      end
+    end
+  end
+  while allow_dot != 0
+    if tok_is(toks, atp, 19) == 0
+      set allow_dot = 0
+    else
+      if tok_is(toks, atp + 1 else fail "math", 1) == 0
+        fail "field"
+      end
+      let fld = tok_text(toks, atp + 1 else fail "math")
+      if kind == 3
+        if eqb(fld, "text")
+          set code = code ++ byte(28)
+          set kind = 2
+        else
+          if eqb(fld, "n")
+            set code = code ++ byte(27)
+            set kind = 1
+          else
+            fail "field"
+          end
+        end
+      else
+        if kind < 7
+          fail "field"
+        end
+        if kind >= 1000
+          fail "field"
+        end
+        let dkey = id_text(kind) ++ "/" ++ fld
+        if has(prog.cold.pack.sfld, dkey) == 0
+          fail "field"
+        end
+        let dp = get(prog.cold.pack.sfld, dkey) else fail "field"
+        set code = code ++ byte(51) ++ u16(slot_index(dp))
+        set kind = slot_kind(dp)
+      end
+      set atp = atp + 2 else fail "math"
+    end
+  end
+  if has_op(toks, atp, level) == 0
+    return emit_flat(prog, code, atp, kind, jumps, marks, sn)
+  end
+  let stop = 0
+  let saw_cmp = 0
+  while stop == 0
+    let op = 0
+    let iff = 0
+    let cop = 0
+    let rlevel = 0
+    let took = 0
+    if level >= 1
+      let pop = product_op(toks, atp)
+      if pop != 0
+        set op = pop
+        set iff = 1
+        set rlevel = 0
+        set took = 1
+      end
+    end
+    if took == 0
+      if level >= 2
+        let sop = sum_op(toks, atp)
+        if sop != 0
+          set op = sop
+          set iff = 1
+          set rlevel = 1
+          set took = 1
+        end
+      end
+    end
+    if took == 0
+      if saw_cmp == 0
+        if level >= 3
+          let ck = 0
+          if atp < toks.count
+            set ck = tok_kind(toks, atp)
+          end
+          if ck >= 13
+            if ck <= 18
+              set op = 18
+              set cop = ck - 13 else fail "math"
+              set rlevel = 2
+              set took = 1
+              set saw_cmp = 1
+            end
+          end
+        end
+      end
+    end
+    if took == 0
+      if level >= 4
+        if tok_is(toks, atp, 5)
+          set op = 19
+          set rlevel = 3
+          set took = 2
+        end
+      end
+    end
+    if took == 0
+      set stop = 1
+    else
+      if iff != 0
+        if kind != 1
+          fail "type"
+        end
+      end
+      if took == 2
+        if kind == 1
+          set code = code ++ byte(34)
+          set kind = 2
+        end
+      end
+      let rhs_at = atp + 1 else fail "math"
+      let shift = len(code)
+      let rkind = 0
+      let rprog = prog
+      let rcode = ""
+      let rat = rhs_at
+      let rsn = sn
+      let rjumps = none
+      let rmarks = none
+      if rhs_simple(toks, rhs_at, rlevel)
+        let bit = paint_atom(prog, toks, rhs_at, sn)
+        set rprog = bit.prog
+        set rcode = bit.code
+        set rat = bit.pos
+        set rsn = bit.seen
+        set rkind = bit.kind
+        set rjumps = bit.jumps
+        set rmarks = bit.marks
+      else
+        let deep = flat_parse(prog, toks, rhs_at, failto, sn, rlevel)
+        if deep.kind < 0
+          return deep
+        end
+        set rprog = deep.prog
+        set rcode = deep.code
+        set rat = deep.pos
+        set rsn = deep.seen
+        set rkind = deep.kind
+        set rjumps = deep.jumps
+        set rmarks = deep.marks
+      end
+      if iff != 0
+        if rkind != 1
+          fail "type"
+        end
+      end
+      set jumps = join_notes(jumps, shift_notes(rjumps, shift))
+      set marks = join_notes(marks, shift_notes(rmarks, shift))
+      set code = code ++ rcode
+      set prog = rprog
+      set atp = rat
+      set sn = rsn
+      if took == 2
+        if rkind == 1
+          set code = code ++ byte(34)
+        end
+        set code = code ++ byte(19)
+        set kind = 2
+      end
+      if took == 1
+        if iff != 0
+          let callb = code ++ byte(op)
+          let orel = len(callb) + 1 else fail "math"
+          set code = callb ++ byte(11) ++ z4()
+          set jumps = push(jumps, jnote(orel, failto))
+          set kind = 1
+        end
+        if iff == 0
+          set code = code ++ byte(op) ++ byte(cop)
+          set kind = 1
+        end
+      end
+    end
+  end
+  return emit_flat(prog, code, atp, kind, jumps, marks, sn)
+end
+
+fn flat_expr(p: prog, toks: toks, pos: i64, failto: bytes, seen: i64) -> flat
+  let at_else = has_else(toks, pos)
+  if at_else < 0
+    return flat_parse(p, toks, pos, failto, seen, 4)
+  end
+  let n = seen + 1 else fail "math"
+  let alt = "a" ++ n
+  let done_name = "d" ++ n
+  let left = flat_parse(p, toks, pos, alt, n, 4)
+  if left.kind < 0
+    return flat_no(p, pos, seen)
+  end
+  if left.pos != at_else
+    fail "bad else"
+  end
+  let jmp_rel = 1 + len(left.code) + 1 else fail "math"
+  let merged = byte(12) ++ left.code ++ byte(8) ++ z4()
+  let j2 = shift_notes(left.jumps, 1)
+  set j2 = push(j2, jnote(jmp_rel, done_name))
+  let m2 = shift_notes(left.marks, 1)
+  set m2 = push(m2, jnote(len(merged), alt))
+  let right = flat_expr(left.prog, toks, at_else + 1 else fail "math", failto, left.seen)
+  if right.kind < 0
+    return flat_no(p, pos, seen)
+  end
+  let code2 = merged ++ byte(12) ++ right.code
+  let delta = len(merged) + 1 else fail "math"
+  set j2 = join_notes(j2, shift_notes(right.jumps, delta))
+  set m2 = join_notes(m2, shift_notes(right.marks, delta))
+  set m2 = push(m2, jnote(len(code2), done_name))
+  let ek = left.kind
+  if ek == 0
+    set ek = right.kind
+  end
+  if right.kind != 0
+    if left.kind != 0
+      if left.kind != right.kind
+        fail "type"
+      end
+    end
+  end
+  return emit_flat(right.prog, code2, right.pos, ek, j2, m2, right.seen)
+end
+
+fn flat_fail(p: prog, toks: toks, pos: i64, failto: bytes, seen: i64) -> flat
+  return flat_parse(p, toks, pos, failto, seen, 4)
+end
+fn flat_apply(fl: flat, suffix: bytes) -> prog
+  let code = fl.code ++ suffix
+  let jumps = fl.prog.jumps
+  let ji = 0
+  let jlen = len(fl.jumps)
+  while ji < jlen
+    let item = at(fl.jumps, ji) else fail "block"
+    let slot = fl.prog.count + item.rel else fail "math"
+    set jumps = note(jumps, slot, item.name)
+    set ji = ji + 1 else fail "math"
+  end
+  let marks = fl.prog.cold.marks
+  let mi = 0
+  let mlen = len(fl.marks)
+  while mi < mlen
+    let item2 = at(fl.marks, mi) else fail "block"
+    let atn = fl.prog.count + item2.rel else fail "math"
+    set marks = note(marks, atn, item2.name)
+    set mi = mi + 1 else fail "math"
+  end
+  let tacked = tack(fl.prog, jumps, code)
+  let seen_p = tacked
+  if fl.seen != tacked.cold.seen
+    set seen_p = with_seen(tacked, fl.seen)
+  end
+  if mlen != 0
+    return with_marks(seen_p, marks)
+  end
+  return seen_p
+end
+
+fn emit_let_fast(p: prog, toks: toks) -> prog
+  if toks.count < 4
+    return p
+  end
+  if tok_kind(toks, 1) != 1
+    return p
+  end
+  let eq_at = 2
+  let ann = 0
+  if tok_kind(toks, 2) == 9
+    let typed = read_type(p, toks, 3)
+    if tok_is(toks, typed.pos, 12) == 0
+      return p
+    end
+    set ann = typed.kind
+    set eq_at = typed.pos
+  end
+  if tok_kind(toks, eq_at) != 12
+    return p
+  end
+  let name = tok_text(toks, 1)
+  if has(p.cold.slots, name)
+    fail "already bound"
+  end
+  let fl = flat_expr(p, toks, eq_at + 1 else fail "math", p.cold.failto, p.cold.seen)
+  if fl.kind < 0
+    return p
+  end
+  if fl.pos != toks.count
+    fail "extra tokens"
+  end
+  let kind = fl.kind
+  if ann != 0
+    if kind == 0
+      set kind = ann
+    end
+    if kind != ann
+      fail "type"
+    end
+  end
+  if kind == 0
+    fail "let needs a value"
+  end
+  let slot = len(fl.prog.cold.slots)
+  let slots = put(fl.prog.cold.slots, name, pack_slot(slot, kind))
+  let applied = flat_apply(fl, byte(6) ++ u16(slot))
+  return with_slots(applied, slots)
+end
+
+fn emit_set_fast(p: prog, toks: toks) -> prog
+  if toks.count < 4
+    return p
+  end
+  if tok_kind(toks, 1) != 1
+    return p
+  end
+  if tok_kind(toks, 2) != 12
+    return p
+  end
+  let name = tok_text(toks, 1)
+  if has(p.cold.slots, name) == 0
+    return p
+  end
+  let raw = get(p.cold.slots, name) else fail "unknown name"
+  let slot = slot_index(raw)
+  if slot < p.cold.pack.nparams
+    return p
+  end
+  if slot_kind(raw) == 2
+    if toks.count >= 5
+      if tok_kind(toks, 3) == 1
+        if eqb(tok_text(toks, 3), name)
+          if tok_kind(toks, 4) == 5
+            if has_else(toks, 3) < 0
+              let rhs = flat_expr(p, toks, 5, p.cold.failto, p.cold.seen)
+              if rhs.kind >= 0
+                if rhs.pos == toks.count
+                  let body = rhs
+                  if rhs.kind == 1
+                    set body = flat(rhs.prog, rhs.code ++ byte(34), rhs.pos, 2, rhs.jumps, rhs.marks, rhs.seen)
+                  end
+                  let applied = flat_apply(body, byte(33) ++ u16(slot))
+                  let slots = put(applied.cold.slots, name, pack_slot(slot, 2))
+                  return with_slots(applied, slots)
+                end
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+  let fl = flat_expr(p, toks, 3, p.cold.failto, p.cold.seen)
+  if fl.kind < 0
+    return p
+  end
+  if fl.pos != toks.count
+    fail "extra tokens"
+  end
+  if fl.kind == 0
+    fail "set needs a value"
+  end
+  let applied2 = flat_apply(fl, byte(6) ++ u16(slot))
+  if fl.kind == slot_kind(raw)
+    return applied2
+  end
+  let slots2 = put(applied2.cold.slots, name, pack_slot(slot, fl.kind))
+  return with_slots(applied2, slots2)
+end
+
+fn emit_if_fast(p: prog, toks: toks) -> prog
+  let fl = flat_expr(p, toks, 1, p.cold.failto, p.cold.seen)
+  if fl.kind < 0
+    return p
+  end
+  if fl.pos != toks.count
+    fail "extra tokens"
+  end
+  if fl.kind != 1
+    fail "if needs an i64"
+  end
+  let n = fl.seen + 1 else fail "math"
+  let alt = "a" ++ n
+  let done = "d" ++ n
+  let rel = len(fl.code) + 1 else fail "math"
+  let jumps = push(fl.jumps, jnote(rel, alt))
+  let code = fl.code ++ byte(9) ++ z4()
+  let fl2 = flat(fl.prog, code, fl.pos, 1, jumps, fl.marks, n)
+  let applied = flat_apply(fl2, "")
+  let blocks = push(applied.cold.blocks, block(1, alt, done))
+  return with_blocks(applied, blocks)
+end
+
+fn emit_return_fast(p: prog, toks: toks) -> prog
+  let fl = flat_expr(p, toks, 1, p.cold.failto, p.cold.seen)
+  if fl.kind < 0
+    return p
+  end
+  if fl.pos != toks.count
+    fail "extra tokens"
+  end
+  return flat_apply(fl, byte(31))
+end
+
+fn emit_write_fast(p: prog, toks: toks) -> prog
+  let fl = flat_expr(p, toks, 1, p.cold.failto, p.cold.seen)
+  if fl.kind < 0
+    return p
+  end
+  if fl.pos != toks.count
+    fail "extra tokens"
+  end
+  let suffix = byte(1)
+  if fl.kind == 1
+    set suffix = byte(34) ++ byte(1)
+  end
+  return flat_apply(fl, suffix)
+end
+
+fn emit_fail_fast(p: prog, toks: toks) -> prog
+  if tok_eq(toks, 0, "fail") == 0
+    return p
+  end
+  let fl = flat_fail(p, toks, 0, p.cold.failto, p.cold.seen)
+  if fl.kind < 0
+    return p
+  end
+  if fl.pos != toks.count
+    fail "extra tokens"
+  end
+  return flat_apply(fl, "")
 end
 
 fn emit_let(p: prog, toks: toks) -> prog
+  let fast = emit_let_fast(p, toks)
+  if fast.count != p.count
+    return fast
+  end
   if toks.count < 4
     fail "expected a name"
   end
@@ -4922,17 +6200,17 @@ fn emit_plain_set(p: prog, toks: toks) -> prog
   end
   let raw = get(p.cold.slots, name) else fail "unknown name"
   let slot = slot_index(raw)
-  if slot < p.cold.nparams
+  if slot < p.cold.pack.nparams
     return p
   end
   let fp = locate(toks.raw, 3)
   let fs = packed_start(fp)
   let fe = packed_end(fp)
   let flen = fe - fs else fail "math"
-  if seek_span_buf(p.cold.fnames, toks.raw, fs, flen) < 0
+  if seek_span_buf(p.cold.pack.fnames, toks.raw, fs, flen) < 0
     return p
   end
-  let want = seek_span_buf(p.cold.arity, toks.raw, fs, flen)
+  let want = seek_span_buf(p.cold.pack.arity, toks.raw, fs, flen)
   if want < 0
     return p
   end
@@ -4960,7 +6238,7 @@ fn emit_plain_set(p: prog, toks: toks) -> prog
           else
             let num = span_i64(toks.raw, a, b)
             set pcur = intern_i64(pcur, num)
-            let ix = seek_i64(pcur.cold.imap, num)
+            let ix = seek_i64(pcur.cold.pack.imap, num)
             if ix < 0
               fail "const"
             end
@@ -4972,7 +6250,7 @@ fn emit_plain_set(p: prog, toks: toks) -> prog
           if k == 3
             let lit = tok_text(toks, i)
             set pcur = intern_bytes(pcur, lit)
-            let sx = seek_buf(pcur.cold.smap, lit)
+            let sx = seek_buf(pcur.cold.pack.smap, lit)
             if sx < 0
               fail "const"
             end
@@ -5035,11 +6313,11 @@ fn emit_plain_set(p: prog, toks: toks) -> prog
   if got != want
     return p
   end
-  let idx = seek_span_buf(p.cold.fnames, toks.raw, fs, flen)
+  let idx = seek_span_buf(p.cold.pack.fnames, toks.raw, fs, flen)
   if idx < 0
     return p
   end
-  let rk = seek_span_buf(p.cold.rets, toks.raw, fs, flen)
+  let rk = seek_span_buf(p.cold.pack.rets, toks.raw, fs, flen)
   if rk <= 0
     set rk = 1
   end
@@ -5060,6 +6338,10 @@ fn emit_set(p: prog, toks: toks) -> prog
   if plain.count != p.count
     return plain
   end
+  let fast = emit_set_fast(p, toks)
+  if fast.count != p.count
+    return fast
+  end
   if toks.count < 4
     fail "expected a name"
   end
@@ -5075,7 +6357,7 @@ fn emit_set(p: prog, toks: toks) -> prog
   end
   let raw = get(p.cold.slots, name) else fail "unknown name"
   let slot = slot_index(raw)
-  if slot < p.cold.nparams
+  if slot < p.cold.pack.nparams
     fail "parameter"
   end
   if slot_kind(raw) == 2
@@ -5100,6 +6382,10 @@ fn emit_set(p: prog, toks: toks) -> prog
 end
 
 fn emit_if(p: prog, toks: toks) -> prog
+  let fast = emit_if_fast(p, toks)
+  if fast.count != p.count
+    return fast
+  end
   let cur = parse_expr(p, toks, 1)
   if cur.pos != toks.count
     fail "extra tokens"
@@ -5111,7 +6397,7 @@ fn emit_if(p: prog, toks: toks) -> prog
   let alt = "a" ++ n
   let done = "d" ++ n
   let jumped = emit_rel(with_seen(cur.prog, n), 9, alt)
-  let blocks = push(jumped.cold.blocks, block(1, alt, done))
+  let blocks = push(jumped.cold.blocks, made_block(1, alt, done))
   return with_blocks(jumped, blocks)
 end
 
@@ -5128,7 +6414,7 @@ fn emit_while(p: prog, toks: toks) -> prog
     fail "while needs an i64"
   end
   let jumped = emit_rel(cur.prog, 9, done)
-  let blocks = push(jumped.cold.blocks, block(2, head, done))
+  let blocks = push(jumped.cold.blocks, made_block(2, head, done))
   return with_blocks(jumped, blocks)
 end
 
@@ -5147,11 +6433,15 @@ fn emit_else(p: prog, toks: toks) -> prog
   let jumped = emit_rel(p, 8, top.done)
   let marked = mark_prog(jumped, top.alt)
   let rest = drop_last(marked.cold.blocks)
-  let blocks = push(rest, block(3, top.alt, top.done))
+  let blocks = push(rest, made_block(3, top.alt, top.done))
   return with_blocks(marked, blocks)
 end
 
 fn emit_fail_stmt(p: prog, toks: toks) -> prog
+  let fast = emit_fail_fast(p, toks)
+  if fast.count != p.count
+    return fast
+  end
   let cur = parse_fail_expr(p, toks, 0)
   if cur.pos != toks.count
     fail "extra tokens"
@@ -5267,7 +6557,7 @@ fn emit_for_bytes(p: prog, toks: toks) -> prog
   let pindex = emit_push_slot(ptext, index_slot)
   let viewed = emit_iffail(take_code(pindex, byte(24)))
   let popb = emit_pop_slot(viewed, byte_slot)
-  let blocks = push(popb.cold.blocks, block(5, loop, done))
+  let blocks = push(popb.cold.blocks, made_block(5, loop, done))
   return with_blocks(popb, blocks)
 end
 
@@ -5339,7 +6629,7 @@ fn emit_for_agg(p: prog, toks: toks) -> prog
   let pindex = emit_push_slot(ptext, index_slot)
   let viewed = emit_iffail(take_code(pindex, byte(at_op)))
   let popb = emit_pop_slot(viewed, item_slot)
-  let blocks = push(popb.cold.blocks, block(5, loop, done))
+  let blocks = push(popb.cold.blocks, made_block(5, loop, done))
   return with_blocks(popb, blocks)
 end
 
@@ -5417,7 +6707,7 @@ fn emit_for(p: prog, toks: toks) -> prog
   let viewed = emit_iffail(take_code(pnum, byte(26)))
   let popi = emit_pop_slot(viewed, index_slot)
   let popl = emit_pop_slot(popi, line_slot)
-  let blocks = push(popl.cold.blocks, block(4, loop, done))
+  let blocks = push(popl.cold.blocks, made_block(4, loop, done))
   return with_blocks(popl, blocks)
 end
 
@@ -5428,16 +6718,16 @@ fn on_line(p: prog, text: bytes) -> prog
     return p
   end
   let head = tok_text(toks, 0)
-  if p.cold.live == 3
+  if p.cold.pack.live == 3
     if eqb(head, "end")
       if toks.count != 1
         fail "extra tokens"
       end
-      return with_row(p, p.cold.sname, p.cold.sfld, p.cold.nstruct, "", 0, 0)
+      return with_row(p, p.cold.pack.sname, p.cold.pack.sfld, p.cold.pack.nstruct, "", 0, 0)
     end
     return p
   end
-  if p.cold.live == 0
+  if p.cold.pack.live == 0
     if eqb(head, "fn")
       if toks.count < 2
         fail "expected a name"
@@ -5457,7 +6747,7 @@ fn on_line(p: prog, text: bytes) -> prog
       return p
     end
     if eqb(head, "struct")
-      return with_row(p, p.cold.sname, p.cold.sfld, p.cold.nstruct, "", 0, 3)
+      return with_row(p, p.cold.pack.sname, p.cold.pack.sfld, p.cold.pack.nstruct, "", 0, 3)
     end
     fail "expected fn"
     return p
@@ -5500,7 +6790,7 @@ fn on_line(p: prog, text: bytes) -> prog
 end
 
 fn patch_code(p: prog) -> prog
-  let code = paint(p.cold.code, bfinish(p.jumps), bfinish(p.cold.marks), 0)
+  let code = paint(p.cold.pack.code, bfinish(p.jumps), bfinish(p.cold.marks), 0)
   return with_code(p, code)
 end
 
@@ -5508,16 +6798,16 @@ fn compile(text: bytes) -> prog
   let none: map bytes i64 = map()
   let seed = fresh(bnew(), bnew(), none, none, 7, bnew())
   let typed = scan_fns(scan_structs(seed, text), text)
-  let p = fresh(typed.cold.fnames, typed.cold.arity, typed.cold.sname, typed.cold.sfld, typed.cold.nstruct, typed.cold.rets)
+  let p = fresh(typed.cold.pack.fnames, typed.cold.pack.arity, typed.cold.pack.sname, typed.cold.pack.sfld, typed.cold.pack.nstruct, typed.cold.pack.rets)
   let seen = 0
   for line in lines(text)
     set seen = seen + 1 else fail "math"
     set p = on_line(p, line.text)
   end
-  if p.cold.live != 0
+  if p.cold.pack.live != 0
     fail "unclosed fn"
   end
-  if p.cold.saw_main == 0
+  if p.cold.pack.saw_main == 0
     fail "missing main"
   end
   return patch_code(finish_code(finish_pool(p)))
@@ -5555,12 +6845,15 @@ fn bpush(b: buf, extra: bytes) -> buf
 end
 
 fn finish_pool(p: prog) -> prog
-  return spawn(p.cold.code, bfinish(p.cold.pbuf), p.cold.nconst, p.cold.strs, p.cold.funcs, p.jumps, p.cold.marks, p.cold.imap, p.cold.bmap, p.cold.smap, p.cold.fnames, p.cold.arity, p.cold.slots, p.cold.unwind, p.cold.main_off, p.cold.main_slots, p.cold.saw_main, p.cold.live, p.cold.start, p.cold.nparams, p.cold.is_main, p.cold.seen, as_buf(p), p.cold.blocks, p.cold.failto, p.cold.pbuf, p.cold.sname, p.cold.sfld, p.cold.nstruct, p.cold.building, p.cold.nfield, p.cold.rets)
+  return spawn(p.cold.pack.code, bfinish(p.cold.pack.pbuf), p.cold.pack.nconst, p.cold.pack.strs, p.cold.pack.funcs, p.jumps, p.cold.marks, p.cold.pack.imap, p.cold.pack.bmap, p.cold.pack.smap, p.cold.pack.fnames, p.cold.pack.arity, p.cold.slots, p.cold.pack.unwind, p.cold.pack.main_off, p.cold.pack.main_slots, p.cold.pack.saw_main, p.cold.pack.live, p.cold.pack.start, p.cold.pack.nparams, p.cold.pack.is_main, p.cold.seen, as_buf(p), p.cold.blocks, p.cold.failto, p.cold.pack.pbuf, p.cold.pack.sname, p.cold.pack.sfld, p.cold.pack.nstruct, p.cold.pack.building, p.cold.pack.nfield, p.cold.pack.rets)
 end
 
 fn badd(b: buf, extra: bytes) -> buf
   if len(extra) == 0
     return b
+  end
+  if len(extra) >= 256
+    return bpush(b, extra)
   end
   let part = b.part ++ extra
   let fills = b.fills + 1 else fail "math"
@@ -5694,22 +6987,22 @@ fn poke(data: bytes, off: i64, value: i64, nbytes: i64) -> bytes
 end
 
 fn mem_image(p: prog) -> bytes
-  let gap = rem(len(p.cold.code), 8)
-  let padded = p.cold.code
+  let gap = rem(len(p.cold.pack.code), 8)
+  let padded = p.cold.pack.code
   if gap != 0
-    set padded = p.cold.code ++ zeros(8 - gap else fail "math")
+    set padded = p.cold.pack.code ++ zeros(8 - gap else fail "math")
   end
   let pool_off = 512 + len(padded) else fail "math"
-  let funcs_off = pool_off + len(p.cold.pool) else fail "math"
+  let funcs_off = pool_off + len(p.cold.pack.pool) else fail "math"
   let head = zeros(512)
-  set head = poke(head, 16, p.cold.main_off, 8)
-  set head = poke(head, 24, p.cold.main_slots, 8)
-  set head = poke(head, 104, len(p.cold.code), 8)
-  set head = poke(head, 208, p.cold.nconst, 8)
+  set head = poke(head, 16, p.cold.pack.main_off, 8)
+  set head = poke(head, 24, p.cold.pack.main_slots, 8)
+  set head = poke(head, 104, len(p.cold.pack.code), 8)
+  set head = poke(head, 208, p.cold.pack.nconst, 8)
   set head = poke(head, 216, 512, 8)
   set head = poke(head, 224, pool_off, 8)
   set head = poke(head, 232, funcs_off, 8)
-  return head ++ padded ++ p.cold.pool ++ bfinish(p.cold.funcs)
+  return head ++ padded ++ p.cold.pack.pool ++ bfinish(p.cold.pack.funcs)
 end
 
 fn note(b: buf, slot: i64, name: bytes) -> buf
@@ -6044,7 +7337,7 @@ fn link_exe(p: prog) -> bytes
   let data_rva = align_up(4096 + asm1.buf.count else fail "math", 4096)
   let symbols: map bytes i64 = map()
   let data = bnew()
-  let s = place(data, symbols, "strs", bfinish(p.cold.strs), 1, data_rva)
+  let s = place(data, symbols, "strs", bfinish(p.cold.pack.strs), 1, data_rva)
   set s = place(s.data, s.symbols, "zeroch", "0", 1, data_rva)
   set s = place(s.data, s.symbols, "mintext", "-9223372036854775808", 1, data_rva)
   set s = place(s.data, s.symbols, "oommsg", "out of memory\n", 1, data_rva)
@@ -6125,12 +7418,395 @@ fn link_exe(p: prog) -> bytes
   return pe_image(code, bfinish(data), entry_rva, data_rva, import_rva, 40)
 end
 
-fn main
-  if argc() != 3
-    fail "usage: compiler source out\n"
+fn brest(data: bytes) -> buf
+  let parts: list bytes = list()
+  if len(data) == 0
+    return buf(parts, "", 0, 0, "", 0)
   end
+  set parts = push(parts, data)
+  return buf(parts, "", 0, len(data), "", 0)
+end
+
+fn chap_path(prefix: bytes, name: bytes) -> bytes
+  return prefix ++ "." ++ name
+end
+
+fn save_blob(prefix: bytes, name: bytes, data: bytes) -> i64
+  if len(data) == 0
+    return 0
+  end
+  let wrote = save(chap_path(prefix, name), data) else fail reason
+  return wrote
+end
+
+fn open_blob(prefix: bytes, name: bytes, n: i64) -> bytes
+  if n == 0
+    return ""
+  end
+  let raw = open(chap_path(prefix, name), 1048576, "cannot open ", "empty chapter\n", "file too large\n") else fail reason
+  if len(raw) != n
+    fail "chapter"
+  end
+  return raw
+end
+
+fn save_map(out: buf, m: map bytes i64) -> buf
+  let cur = out
+  set cur = badd(cur, q8(len(m)))
+  for k in m
+    set cur = badd(cur, q8(len(k)))
+    set cur = badd(cur, k)
+    set cur = badd(cur, q8(get(m, k) else fail "chapter"))
+  end
+  return cur
+end
+
+fn take_num(c: cursor) -> cursor
+  let v = load_i64(c.data, c.off)
+  return cursor(c.data, c.off + 8 else fail "math", v, c.raw, c.m, c.xs)
+end
+
+fn take_raw(c: cursor) -> cursor
+  let nraw = load_i64(c.data, c.off)
+  let atp = c.off + 8 else fail "math"
+  let raw = ""
+  if nraw > 0
+    set raw = span(c.data, atp, nraw)
+  end
+  return cursor(c.data, atp + nraw else fail "math", nraw, raw, c.m, c.xs)
+end
+
+fn take_map(c: cursor) -> cursor
+  let nmap = load_i64(c.data, c.off)
+  let atp = c.off + 8 else fail "math"
+  let m: map bytes i64 = map()
+  let imap = 0
+  while imap < nmap
+    let klen = load_i64(c.data, atp)
+    set atp = atp + 8 else fail "math"
+    let key = span(c.data, atp, klen)
+    set atp = atp + klen else fail "math"
+    let val = load_i64(c.data, atp)
+    set atp = atp + 8 else fail "math"
+    set m = put(m, key, val)
+    set imap = imap + 1 else fail "math"
+  end
+  return cursor(c.data, atp, nmap, c.raw, m, c.xs)
+end
+
+fn take_blocks(c: cursor) -> cursor
+  let nblk = load_i64(c.data, c.off)
+  let atp = c.off + 8 else fail "math"
+  let xs: list block = list()
+  let iblk = 0
+  while iblk < nblk
+    let kind = load_i64(c.data, atp)
+    set atp = atp + 8 else fail "math"
+    let alen = load_i64(c.data, atp)
+    set atp = atp + 8 else fail "math"
+    let alt = ""
+    if alen > 0
+      set alt = span(c.data, atp, alen)
+    end
+    set atp = atp + alen else fail "math"
+    let dlen = load_i64(c.data, atp)
+    set atp = atp + 8 else fail "math"
+    let done_b = ""
+    if dlen > 0
+      set done_b = span(c.data, atp, dlen)
+    end
+    set atp = atp + dlen else fail "math"
+    set xs = push(xs, block(kind, alt, done_b))
+    set iblk = iblk + 1 else fail "math"
+  end
+  return cursor(c.data, atp, nblk, c.raw, c.m, xs)
+end
+
+fn save_blocks(out: buf, xs: list block) -> buf
+  let cur = out
+  set cur = badd(cur, q8(len(xs)))
+  let iblk = 0
+  let nblk = len(xs)
+  while iblk < nblk
+    let item = at(xs, iblk) else fail "chapter"
+    set cur = badd(cur, q8(item.kind))
+    set cur = badd(cur, q8(len(item.alt)))
+    set cur = badd(cur, item.alt)
+    set cur = badd(cur, q8(len(item.done)))
+    set cur = badd(cur, item.done)
+    set iblk = iblk + 1 else fail "math"
+  end
+  return cur
+end
+
+fn write_chap(prefix: bytes, p: prog, row: i64) -> i64
+  let code = bfinish(as_buf(p))
+  if len(code) != p.count
+    fail "chapter"
+  end
+  let jumps = bfinish(p.jumps)
+  let marks = bfinish(p.cold.marks)
+  let strs = bfinish(p.cold.pack.strs)
+  let funcs = bfinish(p.cold.pack.funcs)
+  let bmap = bfinish(p.cold.pack.bmap)
+  let smap = bfinish(p.cold.pack.smap)
+  let fnames = bfinish(p.cold.pack.fnames)
+  let arity = bfinish(p.cold.pack.arity)
+  let pbuf = bfinish(p.cold.pack.pbuf)
+  let rets = bfinish(p.cold.pack.rets)
+  let out = bnew()
+  set out = badd(out, q8(row))
+  set out = badd(out, q8(p.cold.pack.nconst))
+  set out = badd(out, q8(p.cold.pack.main_off))
+  set out = badd(out, q8(p.cold.pack.main_slots))
+  set out = badd(out, q8(p.cold.pack.saw_main))
+  set out = badd(out, q8(p.cold.pack.live))
+  set out = badd(out, q8(p.cold.pack.start))
+  set out = badd(out, q8(p.cold.pack.nparams))
+  set out = badd(out, q8(p.cold.pack.is_main))
+  set out = badd(out, q8(p.cold.seen))
+  set out = badd(out, q8(p.cold.pack.nstruct))
+  set out = badd(out, q8(p.cold.pack.nfield))
+  set out = badd(out, q8(len(p.cold.pack.unwind)))
+  set out = badd(out, p.cold.pack.unwind)
+  set out = badd(out, q8(len(p.cold.pack.building)))
+  set out = badd(out, p.cold.pack.building)
+  set out = badd(out, q8(len(p.cold.failto)))
+  set out = badd(out, p.cold.failto)
+  set out = badd(out, q8(len(p.cold.pack.code)))
+  set out = badd(out, p.cold.pack.code)
+  set out = badd(out, q8(len(p.cold.pack.pool)))
+  set out = badd(out, p.cold.pack.pool)
+  set out = badd(out, q8(len(p.cold.pack.imap)))
+  set out = badd(out, p.cold.pack.imap)
+  set out = badd(out, q8(len(code)))
+  set out = badd(out, q8(len(jumps)))
+  set out = badd(out, q8(len(marks)))
+  set out = badd(out, q8(len(strs)))
+  set out = badd(out, q8(len(funcs)))
+  set out = badd(out, q8(len(bmap)))
+  set out = badd(out, q8(len(smap)))
+  set out = badd(out, q8(len(fnames)))
+  set out = badd(out, q8(len(arity)))
+  set out = badd(out, q8(len(pbuf)))
+  set out = badd(out, q8(len(rets)))
+  set out = save_map(out, p.cold.slots)
+  set out = save_map(out, p.cold.pack.sname)
+  set out = save_map(out, p.cold.pack.sfld)
+  set out = save_blocks(out, p.cold.blocks)
+  let meta = bfinish(out)
+  let meta_n = save_blob(prefix, "meta", meta)
+  let code_n = save_blob(prefix, "code", code)
+  let jump_n = save_blob(prefix, "jumps", jumps)
+  let mark_n = save_blob(prefix, "marks", marks)
+  let strs_n = save_blob(prefix, "strs", strs)
+  let funcs_n = save_blob(prefix, "funcs", funcs)
+  let bmap_n = save_blob(prefix, "bmap", bmap)
+  let smap_n = save_blob(prefix, "smap", smap)
+  let name_n = save_blob(prefix, "fnames", fnames)
+  let arity_n = save_blob(prefix, "arity", arity)
+  let pool_n = save_blob(prefix, "pbuf", pbuf)
+  let rets_n = save_blob(prefix, "rets", rets)
+  return meta_n + code_n else fail "math"
+end
+
+fn blank_cursor(data: bytes) -> cursor
+  let none: map bytes i64 = map()
+  let xs: list block = list()
+  return cursor(data, 0, 0, "", none, xs)
+end
+
+fn load_chap(prefix: bytes, expect: i64) -> prog
+  let opened = open(chap_path(prefix, "meta"), 1048576, "cannot open ", "empty chapter\n", "file too large\n") else fail reason
+  let c0 = blank_cursor(opened)
+  let rowc = take_num(c0)
+  if rowc.n != expect
+    fail "chapter"
+  end
+  let nconst = take_num(rowc)
+  let main_off = take_num(nconst)
+  let main_slots = take_num(main_off)
+  let saw_main = take_num(main_slots)
+  let live = take_num(saw_main)
+  let fnstart = take_num(live)
+  let nparams = take_num(fnstart)
+  let is_main = take_num(nparams)
+  let labelseen = take_num(is_main)
+  let nstruct = take_num(labelseen)
+  let nfield = take_num(nstruct)
+  let unwind = take_raw(nfield)
+  let building = take_raw(unwind)
+  let failto = take_raw(building)
+  let packcode = take_raw(failto)
+  let pool = take_raw(packcode)
+  let imap = take_raw(pool)
+  let ncode = take_num(imap)
+  let njumps = take_num(ncode)
+  let nmarks = take_num(njumps)
+  let nstrs = take_num(nmarks)
+  let nfuncs = take_num(nstrs)
+  let nbmap = take_num(nfuncs)
+  let nsmap = take_num(nbmap)
+  let nfnames = take_num(nsmap)
+  let narity = take_num(nfnames)
+  let npbuf = take_num(narity)
+  let nrets = take_num(npbuf)
+  let slots = take_map(nrets)
+  let sname = take_map(slots)
+  let sfld = take_map(sname)
+  let blocks = take_blocks(sfld)
+  let code = open_blob(prefix, "code", ncode.n)
+  let jumpsb = open_blob(prefix, "jumps", njumps.n)
+  let marksb = open_blob(prefix, "marks", nmarks.n)
+  let strsb = open_blob(prefix, "strs", nstrs.n)
+  let funcsb = open_blob(prefix, "funcs", nfuncs.n)
+  let bmapb = open_blob(prefix, "bmap", nbmap.n)
+  let smapb = open_blob(prefix, "smap", nsmap.n)
+  let fnameb = open_blob(prefix, "fnames", nfnames.n)
+  let arityb = open_blob(prefix, "arity", narity.n)
+  let pbufb = open_blob(prefix, "pbuf", npbuf.n)
+  let retsb = open_blob(prefix, "rets", nrets.n)
+  return spawn(packcode.raw, pool.raw, nconst.n, brest(strsb), brest(funcsb), brest(jumpsb), brest(marksb), imap.raw, brest(bmapb), brest(smapb), brest(fnameb), brest(arityb), slots.m, unwind.raw, main_off.n, main_slots.n, saw_main.n, live.n, fnstart.n, nparams.n, is_main.n, labelseen.n, brest(code), blocks.xs, failto.raw, brest(pbufb), sname.m, sfld.m, nstruct.n, building.raw, nfield.n, brest(retsb))
+end
+
+fn walk_lines(p0: prog, text: bytes, start: i64, stop: i64) -> prog
+  let p = p0
+  let row = 0
+  for line in lines(text)
+    set row = row + 1 else fail "math"
+    if row > start
+      if stop == 0
+        set p = on_line(p, line.text)
+      end
+      if stop != 0
+        if row <= stop
+          set p = on_line(p, line.text)
+        end
+      end
+    end
+    if stop != 0
+      if row == stop
+        return p
+      end
+    end
+  end
+  if stop != 0
+    fail "short source"
+  end
+  if p.cold.pack.live != 0
+    fail "unclosed fn"
+  end
+  if p.cold.pack.saw_main == 0
+    fail "missing main"
+  end
+  return p
+end
+
+fn run_full() -> i64
   let src = open(arg(1), 1048576, "cannot open ", "", "file too large\n") else fail reason
   let compiled = compile(src)
   let image = link_exe(compiled)
   let wrote = save(arg(2), image) else fail reason
+  return wrote
+end
+
+fn begin_chap(src: bytes, prefix: bytes, start: i64) -> prog
+  if start == 0
+    let none: map bytes i64 = map()
+    let seed = fresh(bnew(), bnew(), none, none, 7, bnew())
+    let typed = scan_fns(scan_structs(seed, src), src)
+    return fresh(typed.cold.pack.fnames, typed.cold.pack.arity, typed.cold.pack.sname, typed.cold.pack.sfld, typed.cold.pack.nstruct, typed.cold.pack.rets)
+  end
+  return load_chap(prefix, start)
+end
+
+fn run_chap() -> i64
+  let src = open(arg(1), 1048576, "cannot open ", "", "file too large\n") else fail reason
+  let prefix = arg(2)
+  let start = i64(arg(4)) else fail "chapter"
+  let stop = i64(arg(5)) else fail "chapter"
+  let p = begin_chap(src, prefix, start)
+  let walked = walk_lines(p, src, start, stop)
+  if stop != 0
+    let saved = write_chap(prefix, walked, stop)
+    return saved
+  end
+  let finished = patch_code(finish_code(finish_pool(walked)))
+  let image = link_exe(finished)
+  let wrote = save(arg(3), image) else fail reason
+  return wrote
+end
+
+fn save_link(prefix: bytes, p: prog) -> i64
+  let code = p.cold.pack.code
+  let pool = p.cold.pack.pool
+  let funcs = bfinish(p.cold.pack.funcs)
+  let strs = bfinish(p.cold.pack.strs)
+  let meta = q8(p.cold.pack.main_off) ++ q8(p.cold.pack.main_slots) ++ q8(p.cold.pack.nconst)
+  let meta2 = meta ++ q8(len(code)) ++ q8(len(pool)) ++ q8(len(funcs)) ++ q8(len(strs))
+  let n1 = save_blob(prefix, "pcode", code)
+  let n2 = save_blob(prefix, "ppool", pool)
+  let n3 = save_blob(prefix, "pfuncs", funcs)
+  let n4 = save_blob(prefix, "pstrs", strs)
+  let n5 = save_blob(prefix, "pmeta", meta2)
+  return n1 + n5 else fail "math"
+end
+
+fn paint_only() -> i64
+  let src = open(arg(1), 1048576, "cannot open ", "", "file too large\n") else fail reason
+  let prefix = arg(2)
+  let start = i64(arg(4)) else fail "chapter"
+  let loaded = load_chap(prefix, start)
+  let walked = walk_lines(loaded, src, start, 0)
+  let finished = patch_code(finish_code(finish_pool(walked)))
+  let saved = save_link(prefix, finished)
+  return saved
+end
+
+fn link_only() -> i64
+  let prefix = arg(2)
+  let meta = open(chap_path(prefix, "pmeta"), 1048576, "cannot open ", "empty chapter\n", "file too large\n") else fail reason
+  let c0 = blank_cursor(meta)
+  let main_off = take_num(c0)
+  let main_slots = take_num(main_off)
+  let nconst = take_num(main_slots)
+  let ncode = take_num(nconst)
+  let npool = take_num(ncode)
+  let nfuncs = take_num(npool)
+  let nstrs = take_num(nfuncs)
+  let code = open_blob(prefix, "pcode", ncode.n)
+  let pool = open_blob(prefix, "ppool", npool.n)
+  let funcs = open_blob(prefix, "pfuncs", nfuncs.n)
+  let strs = open_blob(prefix, "pstrs", nstrs.n)
+  let none: map bytes i64 = map()
+  let blocks: list block = list()
+  let p = spawn(code, pool, nconst.n, brest(strs), brest(funcs), bnew(), bnew(), "", bnew(), bnew(), bnew(), bnew(), none, "", main_off.n, main_slots.n, 1, 0, 0, 0, 0, 0, bnew(), blocks, "", bnew(), none, none, 7, "", 0, bnew())
+  let image = link_exe(p)
+  let wrote = save(arg(3), image) else fail reason
+  return wrote
+end
+
+fn main
+  if argc() == 3
+    let full = run_full()
+  end
+  if argc() == 6
+    let chap = run_chap()
+  end
+  if argc() == 7
+    let mode = i64(arg(6)) else fail "chapter"
+    if mode == 1
+      let painted = paint_only()
+    end
+    if mode == 2
+      let linked = link_only()
+    end
+  end
+  if argc() != 3
+    if argc() != 6
+      if argc() != 7
+        fail "usage: compiler source out\n"
+      end
+    end
+  end
 end
