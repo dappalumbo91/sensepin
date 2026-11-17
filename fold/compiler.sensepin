@@ -594,6 +594,102 @@ fn jbe(a: unit, name: bytes) -> unit
   return jcc(a, 6, name)
 end
 
+fn and_reg(a: unit, dest: i64, src: i64) -> unit
+  return alu(a, 35, dest, src)
+end
+
+fn adc_reg(a: unit, dest: i64, src: i64) -> unit
+  return alu(a, 19, dest, src)
+end
+
+fn adc_reg_imm8(a: unit, dest: i64, n: i64) -> unit
+  return reg_imm(a, 131, 2, dest, n, 1)
+end
+
+fn mul_reg(a: unit, dest: i64) -> unit
+  return ff(a, 247, 4, dest)
+end
+
+fn shl_reg_cl(a: unit, dest: i64) -> unit
+  return ff(a, 211, 4, dest)
+end
+
+fn shr_reg_cl(a: unit, dest: i64) -> unit
+  return ff(a, 211, 5, dest)
+end
+
+fn bsr_reg(a: unit, dest: i64, src: i64) -> unit
+  return emit(a, rex_prefix(1, dest, src) ++ byte(15) ++ byte(189) ++ byte(modrm(3, dest, src)))
+end
+
+fn clc(a: unit) -> unit
+  return emit1(a, 248)
+end
+
+fn lahf(a: unit) -> unit
+  return emit1(a, 159)
+end
+
+fn sahf(a: unit) -> unit
+  return emit1(a, 158)
+end
+
+fn sbb_reg_mem(a: unit, dest: i64, base: i64, disp: i64) -> unit
+  return emit(a, emit_mem(1, 27, -1, dest, base, disp, 1, 0, 0))
+end
+
+fn jge(a: unit, name: bytes) -> unit
+  return jcc(a, 13, name)
+end
+
+fn jle(a: unit, name: bytes) -> unit
+  return jcc(a, 14, name)
+end
+
+fn jne(a: unit, name: bytes) -> unit
+  return jcc(a, 5, name)
+end
+
+fn jp(a: unit, name: bytes) -> unit
+  return jcc(a, 10, name)
+end
+
+fn movq_xmm_reg(a: unit, xmm: i64, reg: i64) -> unit
+  return emit(a, byte(102) ++ rex_prefix(1, xmm, reg) ++ byte(15) ++ byte(110) ++ byte(modrm(3, xmm, reg)))
+end
+
+fn movq_reg_xmm(a: unit, reg: i64, xmm: i64) -> unit
+  return emit(a, byte(102) ++ rex_prefix(1, xmm, reg) ++ byte(15) ++ byte(126) ++ byte(modrm(3, xmm, reg)))
+end
+
+fn addsd(a: unit, dest: i64, src: i64) -> unit
+  return emit(a, byte(242) ++ byte(15) ++ byte(88) ++ byte(modrm(3, dest, src)))
+end
+
+fn mulsd(a: unit, dest: i64, src: i64) -> unit
+  return emit(a, byte(242) ++ byte(15) ++ byte(89) ++ byte(modrm(3, dest, src)))
+end
+
+fn subsd(a: unit, dest: i64, src: i64) -> unit
+  return emit(a, byte(242) ++ byte(15) ++ byte(92) ++ byte(modrm(3, dest, src)))
+end
+
+fn divsd(a: unit, dest: i64, src: i64) -> unit
+  return emit(a, byte(242) ++ byte(15) ++ byte(94) ++ byte(modrm(3, dest, src)))
+end
+
+fn ucomisd(a: unit, dest: i64, src: i64) -> unit
+  return emit(a, byte(102) ++ byte(15) ++ byte(46) ++ byte(modrm(3, dest, src)))
+end
+
+fn cvtsi2sd(a: unit, xmm: i64, reg: i64) -> unit
+  return emit(a, byte(242) ++ rex_prefix(1, xmm, reg) ++ byte(15) ++ byte(42) ++ byte(modrm(3, xmm, reg)))
+end
+
+fn cvttsd2si(a: unit, reg: i64, xmm: i64) -> unit
+  return emit(a, byte(242) ++ rex_prefix(1, reg, xmm) ++ byte(15) ++ byte(44) ++ byte(modrm(3, reg, xmm)))
+end
+
 fn align_size(src: unit, dest: i64) -> unit
   let a = src
   set a = xor_reg(a, 1, 1)
@@ -964,6 +1060,22 @@ set a = cmp_reg_imm8(a, 1, 56)
 set a = je(a, "op_map_len")
 set a = cmp_reg_imm8(a, 1, 57)
 set a = je(a, "op_map_key")
+set a = cmp_reg_imm8(a, 1, 38)
+set a = je(a, "op_fadd")
+set a = cmp_reg_imm8(a, 1, 39)
+set a = je(a, "op_fsub")
+set a = cmp_reg_imm8(a, 1, 40)
+set a = je(a, "op_fmul")
+set a = cmp_reg_imm8(a, 1, 41)
+set a = je(a, "op_fdiv")
+set a = cmp_reg_imm8(a, 1, 42)
+set a = je(a, "op_fneg")
+set a = cmp_reg_imm8(a, 1, 43)
+set a = je(a, "op_fcmp")
+set a = cmp_reg_imm8(a, 1, 44)
+set a = je(a, "op_ffrom")
+set a = cmp_reg_imm8(a, 1, 45)
+set a = je(a, "op_ftoi")
 set a = jmp_label(a, "stop1")
 set a = label(a, "op_halt")
 set a = mov_reg_mem(a, 0, 5, 176)
@@ -1354,6 +1466,12 @@ set a = mov_mem_reg(a, 5, 24, 0)
 set a = jmp_label(a, "dispatch")
 set a = label(a, "op_dec")
 set a = call_label(a, "pop_cell")
+set a = mov_reg_mem(a, 1, 3, 0)
+set a = cmp_reg_imm8(a, 1, 3)
+set a = jnz(a, "dec_i64")
+set a = mov_reg_mem(a, 12, 3, 8)
+set a = jmp_label(a, "dec_f64")
+set a = label(a, "dec_i64")
 set a = mov_reg_mem(a, 0, 3, 8)
 set a = test_reg(a, 0, 0)
 set a = jz(a, "dec_zero")
@@ -1500,7 +1618,870 @@ set a = emit_bytes_ops(a)
 set a = emit_open(a)
 set a = emit_span(a)
 set a = emit_rows(a)
+set a = emit_float(a)
 
+  return a
+end
+
+fn emit_float(src: unit) -> unit
+  let a = src
+  set a = label(a, "op_fadd")
+  set a = call_label(a, "pop_cell")
+  set a = mov_reg_mem(a, 13, 3, 8)
+  set a = call_label(a, "pop_cell")
+  set a = mov_reg_mem(a, 12, 3, 8)
+  set a = movq_xmm_reg(a, 0, 12)
+  set a = movq_xmm_reg(a, 1, 13)
+  set a = addsd(a, 0, 1)
+  set a = jmp_label(a, "f64_finish")
+  set a = label(a, "op_fsub")
+  set a = call_label(a, "pop_cell")
+  set a = mov_reg_mem(a, 13, 3, 8)
+  set a = call_label(a, "pop_cell")
+  set a = mov_reg_mem(a, 12, 3, 8)
+  set a = movq_xmm_reg(a, 0, 12)
+  set a = movq_xmm_reg(a, 1, 13)
+  set a = subsd(a, 0, 1)
+  set a = jmp_label(a, "f64_finish")
+  set a = label(a, "op_fmul")
+  set a = call_label(a, "pop_cell")
+  set a = mov_reg_mem(a, 13, 3, 8)
+  set a = call_label(a, "pop_cell")
+  set a = mov_reg_mem(a, 12, 3, 8)
+  set a = movq_xmm_reg(a, 0, 12)
+  set a = movq_xmm_reg(a, 1, 13)
+  set a = mulsd(a, 0, 1)
+  set a = jmp_label(a, "f64_finish")
+  set a = label(a, "op_fdiv")
+  set a = call_label(a, "pop_cell")
+  set a = mov_reg_mem(a, 13, 3, 8)
+  set a = call_label(a, "pop_cell")
+  set a = mov_reg_mem(a, 12, 3, 8)
+  set a = movq_xmm_reg(a, 0, 12)
+  set a = movq_xmm_reg(a, 1, 13)
+  set a = divsd(a, 0, 1)
+  set a = jmp_label(a, "f64_finish")
+  set a = label(a, "op_fneg")
+  set a = call_label(a, "pop_cell")
+  set a = mov_reg_mem(a, 12, 3, 8)
+  set a = mov_reg_imm64(a, 1, -9223372036854775808)
+  set a = xor_reg(a, 12, 1)
+  set a = movq_xmm_reg(a, 0, 12)
+  set a = jmp_label(a, "f64_finish")
+  set a = label(a, "f64_finish")
+  set a = movq_reg_xmm(a, 12, 0)
+  set a = mov_reg_reg(a, 0, 12)
+  set a = mov_reg_imm64(a, 1, 9218868437227405312)
+  set a = and_reg(a, 0, 1)
+  set a = cmp_reg(a, 0, 1)
+  set a = je(a, "fail_empty")
+  set a = xor_reg(a, 13, 13)
+  set a = mov_reg_imm32(a, 14, 3)
+  set a = call_label(a, "push_tagged")
+  set a = jmp_label(a, "dispatch")
+  set a = label(a, "op_fcmp")
+  set a = call_label(a, "read_u8")
+  set a = mov_reg_reg(a, 15, 0)
+  set a = call_label(a, "pop_cell")
+  set a = mov_reg_mem(a, 13, 3, 8)
+  set a = call_label(a, "pop_cell")
+  set a = mov_reg_mem(a, 12, 3, 8)
+  set a = movq_xmm_reg(a, 0, 12)
+  set a = movq_xmm_reg(a, 1, 13)
+  set a = ucomisd(a, 0, 1)
+  set a = jp(a, "fcmp_nan")
+  set a = cmp_reg_imm8(a, 15, 0)
+  set a = je(a, "fcmp_eq")
+  set a = cmp_reg_imm8(a, 15, 1)
+  set a = je(a, "fcmp_ne")
+  set a = cmp_reg_imm8(a, 15, 2)
+  set a = je(a, "fcmp_lt")
+  set a = cmp_reg_imm8(a, 15, 3)
+  set a = je(a, "fcmp_gt")
+  set a = cmp_reg_imm8(a, 15, 4)
+  set a = je(a, "fcmp_le")
+  set a = label(a, "fcmp_ge")
+  set a = xor_reg(a, 1, 1)
+  set a = ucomisd(a, 0, 1)
+  set a = setcc(a, 147, 1)
+  set a = jmp_label(a, "fcmp_push")
+  set a = label(a, "fcmp_eq")
+  set a = xor_reg(a, 1, 1)
+  set a = ucomisd(a, 0, 1)
+  set a = setcc(a, 148, 1)
+  set a = jmp_label(a, "fcmp_push")
+  set a = label(a, "fcmp_ne")
+  set a = xor_reg(a, 1, 1)
+  set a = ucomisd(a, 0, 1)
+  set a = setcc(a, 149, 1)
+  set a = jmp_label(a, "fcmp_push")
+  set a = label(a, "fcmp_lt")
+  set a = xor_reg(a, 1, 1)
+  set a = ucomisd(a, 0, 1)
+  set a = setcc(a, 146, 1)
+  set a = jmp_label(a, "fcmp_push")
+  set a = label(a, "fcmp_gt")
+  set a = xor_reg(a, 1, 1)
+  set a = ucomisd(a, 0, 1)
+  set a = setcc(a, 151, 1)
+  set a = jmp_label(a, "fcmp_push")
+  set a = label(a, "fcmp_le")
+  set a = xor_reg(a, 1, 1)
+  set a = ucomisd(a, 0, 1)
+  set a = setcc(a, 150, 1)
+  set a = jmp_label(a, "fcmp_push")
+  set a = label(a, "fcmp_nan")
+  set a = xor_reg(a, 1, 1)
+  set a = cmp_reg_imm8(a, 15, 1)
+  set a = jne(a, "fcmp_push")
+  set a = mov_reg_imm32(a, 1, 1)
+  set a = label(a, "fcmp_push")
+  set a = mov_reg_reg(a, 0, 1)
+  set a = call_label(a, "push_i64")
+  set a = jmp_label(a, "dispatch")
+  set a = label(a, "op_ffrom")
+  set a = call_label(a, "pop_cell")
+  set a = mov_reg_mem(a, 0, 3, 8)
+  set a = cvtsi2sd(a, 0, 0)
+  set a = movq_reg_xmm(a, 12, 0)
+  set a = xor_reg(a, 13, 13)
+  set a = mov_reg_imm32(a, 14, 3)
+  set a = call_label(a, "push_tagged")
+  set a = jmp_label(a, "dispatch")
+  set a = label(a, "op_ftoi")
+  set a = call_label(a, "pop_cell")
+  set a = mov_reg_mem(a, 12, 3, 8)
+  set a = mov_reg_reg(a, 0, 12)
+  set a = mov_reg_imm64(a, 1, 9218868437227405312)
+  set a = and_reg(a, 0, 1)
+  set a = cmp_reg(a, 0, 1)
+  set a = je(a, "fail_empty")
+  set a = movq_xmm_reg(a, 0, 12)
+  set a = mov_reg_imm64(a, 0, 4890909195324358656)
+  set a = movq_xmm_reg(a, 1, 0)
+  set a = ucomisd(a, 0, 1)
+  set a = jae(a, "fail_empty")
+  set a = mov_reg_imm64(a, 0, -4332462841530417152)
+  set a = movq_xmm_reg(a, 1, 0)
+  set a = ucomisd(a, 0, 1)
+  set a = jb(a, "fail_empty")
+  set a = cvttsd2si(a, 12, 0)
+  set a = mov_reg_reg(a, 0, 12)
+  set a = call_label(a, "push_i64")
+  set a = jmp_label(a, "dispatch")
+  set a = label(a, "bn_zero")
+  set a = mov_reg_reg(a, 9, 1)
+  set a = mov_reg_imm32(a, 10, 28)
+  set a = label(a, "bn_zero_loop")
+  set a = xor_reg(a, 0, 0)
+  set a = mov_mem_reg(a, 9, 0, 0)
+  set a = add_reg_imm8(a, 9, 8)
+  set a = dec_reg(a, 10)
+  set a = jnz(a, "bn_zero_loop")
+  set a = ret(a)
+  set a = label(a, "bn_setu")
+  set a = call_label(a, "bn_zero")
+  set a = mov_mem_reg(a, 1, 0, 2)
+  set a = ret(a)
+  set a = label(a, "bn_copy")
+  set a = mov_reg_imm32(a, 9, 28)
+  set a = label(a, "bn_copy_loop")
+  set a = mov_reg_mem(a, 0, 2, 0)
+  set a = mov_mem_reg(a, 1, 0, 0)
+  set a = add_reg_imm8(a, 2, 8)
+  set a = add_reg_imm8(a, 1, 8)
+  set a = dec_reg(a, 9)
+  set a = jnz(a, "bn_copy_loop")
+  set a = ret(a)
+  set a = label(a, "bn_shl")
+  set a = test_reg(a, 8, 8)
+  set a = jz(a, "bn_copy")
+  set a = mov_reg_reg(a, 11, 8)
+  set a = shr_reg_imm8(a, 11, 6)
+  set a = and_reg_imm8(a, 8, 63)
+  set a = cmp_reg_imm8(a, 11, 28)
+  set a = jb(a, "bn_shl_ok")
+  set a = jmp_label(a, "bn_zero")
+  set a = label(a, "bn_shl_ok")
+  set a = call_label(a, "bn_zero")
+  set a = mov_reg_reg(a, 10, 2)
+  set a = mov_reg_reg(a, 9, 1)
+  set a = mov_reg_reg(a, 0, 11)
+  set a = shl_reg_imm8(a, 0, 3)
+  set a = add_reg(a, 9, 0)
+  set a = mov_reg_imm32(a, 0, 28)
+  set a = sub_reg(a, 0, 11)
+  set a = mov_reg_reg(a, 11, 0)
+  set a = label(a, "bn_shl_copy")
+  set a = test_reg(a, 11, 11)
+  set a = jz(a, "bn_shl_bits")
+  set a = mov_reg_mem(a, 0, 10, 0)
+  set a = mov_mem_reg(a, 9, 0, 0)
+  set a = add_reg_imm8(a, 10, 8)
+  set a = add_reg_imm8(a, 9, 8)
+  set a = dec_reg(a, 11)
+  set a = jmp_label(a, "bn_shl_copy")
+  set a = label(a, "bn_shl_bits")
+  set a = test_reg(a, 8, 8)
+  set a = jz(a, "bn_shl_ret")
+  set a = mov_reg_reg(a, 10, 1)
+  set a = xor_reg(a, 9, 9)
+  set a = mov_reg_imm32(a, 11, 28)
+  set a = label(a, "bn_shl_bit")
+  set a = mov_reg_mem(a, 0, 10, 0)
+  set a = mov_reg_reg(a, 2, 0)
+  set a = mov_reg_imm32(a, 1, 64)
+  set a = sub_reg(a, 1, 8)
+  set a = shr_reg_cl(a, 2)
+  set a = mov_reg_reg(a, 1, 8)
+  set a = shl_reg_cl(a, 0)
+  set a = or_reg(a, 0, 9)
+  set a = mov_mem_reg(a, 10, 0, 0)
+  set a = mov_reg_reg(a, 9, 2)
+  set a = add_reg_imm8(a, 10, 8)
+  set a = dec_reg(a, 11)
+  set a = jnz(a, "bn_shl_bit")
+  set a = label(a, "bn_shl_ret")
+  set a = ret(a)
+  set a = label(a, "bn_mul10")
+  set a = mov_reg_reg(a, 10, 1)
+  set a = xor_reg(a, 9, 9)
+  set a = mov_reg_imm32(a, 11, 28)
+  set a = label(a, "bn_mul10_loop")
+  set a = mov_reg_mem(a, 0, 10, 0)
+  set a = mov_reg_imm32(a, 1, 10)
+  set a = mul_reg(a, 1)
+  set a = add_reg(a, 0, 9)
+  set a = adc_reg_imm8(a, 2, 0)
+  set a = mov_mem_reg(a, 10, 0, 0)
+  set a = mov_reg_reg(a, 9, 2)
+  set a = add_reg_imm8(a, 10, 8)
+  set a = dec_reg(a, 11)
+  set a = jnz(a, "bn_mul10_loop")
+  set a = test_reg(a, 9, 9)
+  set a = jnz(a, "oom")
+  set a = ret(a)
+  set a = label(a, "bn_mul10_pow")
+  set a = lea_rip(a, 9, "fp_scratch")
+  set a = mov_mem_reg(a, 9, 0, 1)
+  set a = lea_rip(a, 9, "fp_scratch2")
+  set a = mov_mem_reg(a, 9, 0, 2)
+  set a = label(a, "bn_pow_loop")
+  set a = lea_rip(a, 0, "fp_scratch2")
+  set a = mov_reg_mem(a, 0, 0, 0)
+  set a = test_reg(a, 0, 0)
+  set a = jz(a, "bn_pow_done")
+  set a = lea_rip(a, 1, "fp_scratch")
+  set a = mov_reg_mem(a, 1, 1, 0)
+  set a = call_label(a, "bn_mul10")
+  set a = lea_rip(a, 0, "fp_scratch2")
+  set a = mov_reg_mem(a, 0, 0, 0)
+  set a = dec_reg(a, 0)
+  set a = lea_rip(a, 9, "fp_scratch2")
+  set a = mov_mem_reg(a, 9, 0, 0)
+  set a = jmp_label(a, "bn_pow_loop")
+  set a = label(a, "bn_pow_done")
+  set a = ret(a)
+  set a = label(a, "bn_cmp")
+  set a = mov_reg_reg(a, 10, 1)
+  set a = mov_reg_reg(a, 11, 2)
+  set a = add_reg_imm32(a, 10, 216)
+  set a = add_reg_imm32(a, 11, 216)
+  set a = mov_reg_imm32(a, 9, 28)
+  set a = label(a, "bn_cmp_loop")
+  set a = mov_reg_mem(a, 0, 10, 0)
+  set a = mov_reg_mem(a, 2, 11, 0)
+  set a = cmp_reg(a, 0, 2)
+  set a = ja(a, "bn_cmp_gt")
+  set a = jb(a, "bn_cmp_lt")
+  set a = sub_reg_imm8(a, 10, 8)
+  set a = sub_reg_imm8(a, 11, 8)
+  set a = dec_reg(a, 9)
+  set a = jnz(a, "bn_cmp_loop")
+  set a = xor_reg(a, 0, 0)
+  set a = ret(a)
+  set a = label(a, "bn_cmp_gt")
+  set a = mov_reg_imm32(a, 0, 1)
+  set a = ret(a)
+  set a = label(a, "bn_cmp_lt")
+  set a = mov_reg_imm32(a, 0, 2)
+  set a = ret(a)
+  set a = label(a, "bn_sub")
+  set a = mov_reg_reg(a, 10, 1)
+  set a = mov_reg_reg(a, 11, 2)
+  set a = mov_reg_imm32(a, 9, 28)
+  set a = clc(a)
+  set a = label(a, "bn_sub_loop")
+  set a = mov_reg_mem(a, 0, 10, 0)
+  set a = sbb_reg_mem(a, 0, 11, 0)
+  set a = mov_mem_reg(a, 10, 0, 0)
+  set a = lahf(a)
+  set a = add_reg_imm8(a, 10, 8)
+  set a = add_reg_imm8(a, 11, 8)
+  set a = sahf(a)
+  set a = dec_reg(a, 9)
+  set a = jnz(a, "bn_sub_loop")
+  set a = ret(a)
+  set a = label(a, "bn_bitlen")
+  set a = mov_reg_reg(a, 10, 1)
+  set a = add_reg_imm32(a, 10, 216)
+  set a = mov_reg_imm32(a, 11, 27)
+  set a = label(a, "bn_bitlen_loop")
+  set a = mov_reg_mem(a, 0, 10, 0)
+  set a = test_reg(a, 0, 0)
+  set a = jnz(a, "bn_bitlen_hit")
+  set a = test_reg(a, 11, 11)
+  set a = jz(a, "bn_bitlen_none")
+  set a = sub_reg_imm8(a, 10, 8)
+  set a = dec_reg(a, 11)
+  set a = jmp_label(a, "bn_bitlen_loop")
+  set a = label(a, "bn_bitlen_none")
+  set a = xor_reg(a, 0, 0)
+  set a = ret(a)
+  set a = label(a, "bn_bitlen_hit")
+  set a = bsr_reg(a, 0, 0)
+  set a = shl_reg_imm8(a, 11, 6)
+  set a = add_reg(a, 0, 11)
+  set a = inc_reg(a, 0)
+  set a = ret(a)
+  set a = label(a, "bn_shr1")
+  set a = mov_reg_reg(a, 10, 1)
+  set a = add_reg_imm32(a, 10, 216)
+  set a = mov_reg_imm32(a, 11, 28)
+  set a = xor_reg(a, 9, 9)
+  set a = mov_reg_imm64(a, 8, -9223372036854775808)
+  set a = label(a, "bn_shr1_loop")
+  set a = mov_reg_mem(a, 0, 10, 0)
+  set a = mov_reg_reg(a, 2, 0)
+  set a = and_reg_imm8(a, 2, 1)
+  set a = shr_reg_imm8(a, 0, 1)
+  set a = test_reg(a, 9, 9)
+  set a = jz(a, "bn_shr1_noc")
+  set a = or_reg(a, 0, 8)
+  set a = label(a, "bn_shr1_noc")
+  set a = mov_mem_reg(a, 10, 0, 0)
+  set a = mov_reg_reg(a, 9, 2)
+  set a = sub_reg_imm8(a, 10, 8)
+  set a = dec_reg(a, 11)
+  set a = jnz(a, "bn_shr1_loop")
+  set a = ret(a)
+  set a = label(a, "bn_divmod")
+  set a = xor_reg(a, 0, 0)
+  set a = lea_rip(a, 9, "fp_quot")
+  set a = mov_mem_reg(a, 9, 0, 0)
+  set a = lea_rip(a, 1, "bn1")
+  set a = call_label(a, "bn_bitlen")
+  set a = test_reg(a, 0, 0)
+  set a = jz(a, "bn_divmod_done")
+  set a = mov_reg_reg(a, 15, 0)
+  set a = lea_rip(a, 1, "bn0")
+  set a = call_label(a, "bn_bitlen")
+  set a = cmp_reg(a, 0, 15)
+  set a = jb(a, "bn_divmod_done")
+  set a = sub_reg(a, 0, 15)
+  set a = lea_rip(a, 9, "fp_scratch")
+  set a = mov_mem_reg(a, 9, 0, 0)
+  set a = lea_rip(a, 1, "bn2")
+  set a = lea_rip(a, 2, "bn1")
+  set a = lea_rip(a, 8, "fp_scratch")
+  set a = mov_reg_mem(a, 8, 8, 0)
+  set a = call_label(a, "bn_shl")
+  set a = label(a, "bn_div_loop")
+  set a = lea_rip(a, 1, "bn0")
+  set a = lea_rip(a, 2, "bn2")
+  set a = call_label(a, "bn_cmp")
+  set a = cmp_reg_imm8(a, 0, 2)
+  set a = je(a, "bn_div_next")
+  set a = lea_rip(a, 1, "bn0")
+  set a = lea_rip(a, 2, "bn2")
+  set a = call_label(a, "bn_sub")
+  set a = lea_rip(a, 11, "fp_scratch")
+  set a = mov_reg_mem(a, 11, 11, 0)
+  set a = cmp_reg_imm8(a, 11, 64)
+  set a = jae(a, "bn_div_big")
+  set a = mov_reg_reg(a, 1, 11)
+  set a = mov_reg_imm32(a, 0, 1)
+  set a = shl_reg_cl(a, 0)
+  set a = lea_rip(a, 2, "fp_quot")
+  set a = mov_reg_mem(a, 2, 2, 0)
+  set a = or_reg(a, 2, 0)
+  set a = lea_rip(a, 9, "fp_quot")
+  set a = mov_mem_reg(a, 9, 0, 2)
+  set a = jmp_label(a, "bn_div_next")
+  set a = label(a, "bn_div_big")
+  set a = mov_reg_imm32(a, 0, 1)
+  set a = lea_rip(a, 9, "fp_low")
+  set a = mov_mem_reg(a, 9, 0, 0)
+  set a = label(a, "bn_div_next")
+  set a = lea_rip(a, 0, "fp_scratch")
+  set a = mov_reg_mem(a, 0, 0, 0)
+  set a = test_reg(a, 0, 0)
+  set a = jz(a, "bn_divmod_done")
+  set a = lea_rip(a, 1, "bn2")
+  set a = call_label(a, "bn_shr1")
+  set a = lea_rip(a, 0, "fp_scratch")
+  set a = mov_reg_mem(a, 0, 0, 0)
+  set a = dec_reg(a, 0)
+  set a = lea_rip(a, 9, "fp_scratch")
+  set a = mov_mem_reg(a, 9, 0, 0)
+  set a = jmp_label(a, "bn_div_loop")
+  set a = label(a, "bn_divmod_done")
+  set a = ret(a)
+  set a = label(a, "dec_f64")
+  set a = mov_reg_reg(a, 0, 12)
+  set a = mov_reg_imm64(a, 1, 9223372036854775807)
+  set a = and_reg(a, 0, 1)
+  set a = jz(a, "fp_zero")
+  set a = mov_reg_reg(a, 0, 12)
+  set a = shr_reg_imm8(a, 0, 63)
+  set a = lea_rip(a, 9, "fp_sign")
+  set a = mov_mem_reg(a, 9, 0, 0)
+  set a = mov_reg_reg(a, 0, 12)
+  set a = mov_reg_imm64(a, 1, 9223372036854775807)
+  set a = and_reg(a, 0, 1)
+  set a = lea_rip(a, 9, "fp_bits")
+  set a = mov_mem_reg(a, 9, 0, 0)
+  set a = mov_reg_reg(a, 1, 0)
+  set a = shr_reg_imm8(a, 1, 52)
+  set a = mov_reg_imm32(a, 2, 2047)
+  set a = and_reg(a, 1, 2)
+  set a = mov_reg_reg(a, 2, 0)
+  set a = mov_reg_imm64(a, 8, 4503599627370495)
+  set a = and_reg(a, 2, 8)
+  set a = test_reg(a, 1, 1)
+  set a = jz(a, "fp_sub")
+  set a = mov_reg_imm64(a, 8, 4503599627370496)
+  set a = or_reg(a, 2, 8)
+  set a = lea_rip(a, 9, "fp_sig")
+  set a = mov_mem_reg(a, 9, 0, 2)
+  set a = mov_reg_imm32(a, 8, 1075)
+  set a = sub_reg(a, 1, 8)
+  set a = lea_rip(a, 9, "fp_exp2")
+  set a = mov_mem_reg(a, 9, 0, 1)
+  set a = mov_reg_reg(a, 0, 1)
+  set a = add_reg_imm8(a, 0, 52)
+  set a = call_label(a, "fp_floordiv")
+  set a = lea_rip(a, 9, "fp_est")
+  set a = mov_mem_reg(a, 9, 0, 0)
+  set a = jmp_label(a, "fp_try0")
+  set a = label(a, "fp_sub")
+  set a = lea_rip(a, 9, "fp_sig")
+  set a = mov_mem_reg(a, 9, 0, 2)
+  set a = mov_reg_imm32(a, 1, 1074)
+  set a = neg_reg(a, 1)
+  set a = lea_rip(a, 9, "fp_exp2")
+  set a = mov_mem_reg(a, 9, 0, 1)
+  set a = bsr_reg(a, 0, 2)
+  set a = mov_reg_imm32(a, 1, 1074)
+  set a = sub_reg(a, 0, 1)
+  set a = call_label(a, "fp_floordiv")
+  set a = lea_rip(a, 9, "fp_est")
+  set a = mov_mem_reg(a, 9, 0, 0)
+  set a = label(a, "fp_try0")
+  set a = xor_reg(a, 0, 0)
+  set a = lea_rip(a, 9, "fp_try")
+  set a = mov_mem_reg(a, 9, 0, 0)
+  set a = label(a, "fp_attempt")
+  set a = lea_rip(a, 0, "fp_try")
+  set a = mov_reg_mem(a, 0, 0, 0)
+  set a = inc_reg(a, 0)
+  set a = lea_rip(a, 9, "fp_try")
+  set a = mov_mem_reg(a, 9, 0, 0)
+  set a = cmp_reg_imm8(a, 0, 5)
+  set a = jg(a, "fp_format")
+  set a = xor_reg(a, 0, 0)
+  set a = lea_rip(a, 9, "fp_low")
+  set a = mov_mem_reg(a, 9, 0, 0)
+  set a = lea_rip(a, 1, "bn0")
+  set a = lea_rip(a, 2, "fp_sig")
+  set a = mov_reg_mem(a, 2, 2, 0)
+  set a = call_label(a, "bn_setu")
+  set a = lea_rip(a, 1, "bn1")
+  set a = mov_reg_imm32(a, 2, 1)
+  set a = call_label(a, "bn_setu")
+  set a = lea_rip(a, 0, "fp_exp2")
+  set a = mov_reg_mem(a, 0, 0, 0)
+  set a = test_reg(a, 0, 0)
+  set a = jz(a, "fp_scale")
+  set a = jg(a, "fp_exp_pos")
+  set a = neg_reg(a, 0)
+  set a = mov_reg_reg(a, 8, 0)
+  set a = lea_rip(a, 1, "bn2")
+  set a = lea_rip(a, 2, "bn1")
+  set a = call_label(a, "bn_shl")
+  set a = lea_rip(a, 1, "bn1")
+  set a = lea_rip(a, 2, "bn2")
+  set a = call_label(a, "bn_copy")
+  set a = jmp_label(a, "fp_scale")
+  set a = label(a, "fp_exp_pos")
+  set a = mov_reg_reg(a, 8, 0)
+  set a = lea_rip(a, 1, "bn2")
+  set a = lea_rip(a, 2, "bn0")
+  set a = call_label(a, "bn_shl")
+  set a = lea_rip(a, 1, "bn0")
+  set a = lea_rip(a, 2, "bn2")
+  set a = call_label(a, "bn_copy")
+  set a = label(a, "fp_scale")
+  set a = lea_rip(a, 0, "fp_est")
+  set a = mov_reg_mem(a, 0, 0, 0)
+  set a = mov_reg_imm32(a, 1, 16)
+  set a = sub_reg(a, 1, 0)
+  set a = test_reg(a, 1, 1)
+  set a = jz(a, "fp_build_done")
+  set a = jg(a, "fp_scale_pos")
+  set a = neg_reg(a, 1)
+  set a = mov_reg_reg(a, 2, 1)
+  set a = lea_rip(a, 1, "bn1")
+  set a = call_label(a, "bn_mul10_pow")
+  set a = jmp_label(a, "fp_build_done")
+  set a = label(a, "fp_scale_pos")
+  set a = mov_reg_reg(a, 2, 1)
+  set a = lea_rip(a, 1, "bn0")
+  set a = call_label(a, "bn_mul10_pow")
+  set a = label(a, "fp_build_done")
+  set a = lea_rip(a, 1, "bn0")
+  set a = lea_rip(a, 2, "bn1")
+  set a = call_label(a, "bn_divmod")
+  set a = lea_rip(a, 0, "fp_low")
+  set a = mov_reg_mem(a, 0, 0, 0)
+  set a = test_reg(a, 0, 0)
+  set a = jnz(a, "fp_round_done")
+  set a = lea_rip(a, 1, "bn4")
+  set a = lea_rip(a, 2, "bn0")
+  set a = mov_reg_imm32(a, 8, 1)
+  set a = call_label(a, "bn_shl")
+  set a = lea_rip(a, 1, "bn4")
+  set a = lea_rip(a, 2, "bn1")
+  set a = call_label(a, "bn_cmp")
+  set a = cmp_reg_imm8(a, 0, 1)
+  set a = je(a, "fp_round_up")
+  set a = cmp_reg_imm8(a, 0, 0)
+  set a = jne(a, "fp_round_done")
+  set a = lea_rip(a, 0, "fp_quot")
+  set a = mov_reg_mem(a, 0, 0, 0)
+  set a = mov_reg_imm32(a, 1, 1)
+  set a = test_reg(a, 0, 1)
+  set a = jz(a, "fp_round_done")
+  set a = label(a, "fp_round_up")
+  set a = lea_rip(a, 0, "fp_quot")
+  set a = mov_reg_mem(a, 0, 0, 0)
+  set a = inc_reg(a, 0)
+  set a = lea_rip(a, 9, "fp_quot")
+  set a = mov_mem_reg(a, 9, 0, 0)
+  set a = label(a, "fp_round_done")
+  set a = lea_rip(a, 0, "fp_low")
+  set a = mov_reg_mem(a, 0, 0, 0)
+  set a = test_reg(a, 0, 0)
+  set a = jnz(a, "fp_digits_big")
+  set a = lea_rip(a, 0, "fp_quot")
+  set a = mov_reg_mem(a, 0, 0, 0)
+  set a = lea_rip(a, 15, "fp_digs")
+  set a = xor_reg(a, 3, 3)
+  set a = test_reg(a, 0, 0)
+  set a = jnz(a, "fp_digits_loop")
+  set a = xor_reg(a, 2, 2)
+  set a = mov_mem8_reg(a, 15, 0, 2)
+  set a = mov_reg_imm32(a, 0, 1)
+  set a = lea_rip(a, 9, "fp_ndig")
+  set a = mov_mem_reg(a, 9, 0, 0)
+  set a = jmp_label(a, "fp_digits_done")
+  set a = label(a, "fp_digits_loop")
+  set a = xor_reg(a, 2, 2)
+  set a = mov_reg_imm32(a, 1, 10)
+  set a = udiv_reg(a, 1)
+  set a = mov_reg_reg(a, 11, 15)
+  set a = add_reg(a, 11, 3)
+  set a = mov_mem8_reg(a, 11, 0, 2)
+  set a = inc_reg(a, 3)
+  set a = test_reg(a, 0, 0)
+  set a = jnz(a, "fp_digits_loop")
+  set a = lea_rip(a, 9, "fp_ndig")
+  set a = mov_mem_reg(a, 9, 0, 3)
+  set a = jmp_label(a, "fp_digits_done")
+  set a = label(a, "fp_digits_big")
+  set a = mov_reg_imm32(a, 0, 19)
+  set a = lea_rip(a, 9, "fp_ndig")
+  set a = mov_mem_reg(a, 9, 0, 0)
+  set a = label(a, "fp_digits_done")
+  set a = lea_rip(a, 0, "fp_ndig")
+  set a = mov_reg_mem(a, 0, 0, 0)
+  set a = cmp_reg_imm8(a, 0, 17)
+  set a = je(a, "fp_format")
+  set a = mov_reg_imm32(a, 2, 17)
+  set a = sub_reg(a, 0, 2)
+  set a = lea_rip(a, 1, "fp_est")
+  set a = mov_reg_mem(a, 1, 1, 0)
+  set a = add_reg(a, 1, 0)
+  set a = lea_rip(a, 9, "fp_est")
+  set a = mov_mem_reg(a, 9, 0, 1)
+  set a = jmp_label(a, "fp_attempt")
+  set a = label(a, "fp_format")
+  set a = lea_rip(a, 0, "fp_est")
+  set a = mov_reg_mem(a, 0, 0, 0)
+  set a = lea_rip(a, 1, "fp_ndig")
+  set a = mov_reg_mem(a, 1, 1, 0)
+  set a = add_reg(a, 0, 1)
+  set a = sub_reg_imm8(a, 0, 17)
+  set a = mov_reg_reg(a, 13, 0)
+  set a = xor_reg(a, 14, 14)
+  set a = lea_rip(a, 12, "fp_ndig")
+  set a = mov_reg_mem(a, 12, 12, 0)
+  set a = label(a, "fp_strip")
+  set a = mov_reg_reg(a, 0, 12)
+  set a = dec_reg(a, 0)
+  set a = cmp_reg(a, 14, 0)
+  set a = jge(a, "fp_strip_done")
+  set a = lea_rip(a, 10, "fp_digs")
+  set a = add_reg(a, 10, 14)
+  set a = movzx_reg_byte_mem(a, 0, 10, 0)
+  set a = test_reg(a, 0, 0)
+  set a = jnz(a, "fp_strip_done")
+  set a = inc_reg(a, 14)
+  set a = jmp_label(a, "fp_strip")
+  set a = label(a, "fp_strip_done")
+  set a = lea_rip(a, 0, "fp_ndig")
+  set a = mov_reg_mem(a, 0, 0, 0)
+  set a = mov_reg_reg(a, 12, 0)
+  set a = sub_reg(a, 12, 14)
+  set a = lea_rip(a, 15, "fbuf")
+  set a = lea_rip(a, 0, "fp_sign")
+  set a = mov_reg_mem(a, 0, 0, 0)
+  set a = test_reg(a, 0, 0)
+  set a = jz(a, "fp_nosign")
+  set a = mov_reg_imm32(a, 0, 45)
+  set a = mov_mem8_reg(a, 15, 0, 0)
+  set a = inc_reg(a, 15)
+  set a = label(a, "fp_nosign")
+  set a = cmp_reg_imm8(a, 13, -4)
+  set a = jl(a, "fp_sci")
+  set a = cmp_reg_imm8(a, 13, 17)
+  set a = jge(a, "fp_sci")
+  set a = test_reg(a, 13, 13)
+  set a = jl(a, "fp_frac")
+  set a = mov_reg_reg(a, 0, 12)
+  set a = dec_reg(a, 0)
+  set a = cmp_reg(a, 13, 0)
+  set a = jge(a, "fp_fixed_int")
+  set a = mov_reg_reg(a, 3, 14)
+  set a = add_reg(a, 3, 12)
+  set a = dec_reg(a, 3)
+  set a = mov_reg_reg(a, 11, 13)
+  set a = inc_reg(a, 11)
+  set a = label(a, "fp_mixed_left")
+  set a = lea_rip(a, 10, "fp_digs")
+  set a = add_reg(a, 10, 3)
+  set a = movzx_reg_byte_mem(a, 0, 10, 0)
+  set a = add_reg_imm8(a, 0, 48)
+  set a = mov_mem8_reg(a, 15, 0, 0)
+  set a = inc_reg(a, 15)
+  set a = dec_reg(a, 3)
+  set a = dec_reg(a, 11)
+  set a = jnz(a, "fp_mixed_left")
+  set a = mov_reg_imm32(a, 0, 46)
+  set a = mov_mem8_reg(a, 15, 0, 0)
+  set a = inc_reg(a, 15)
+  set a = label(a, "fp_down_mixed")
+  set a = lea_rip(a, 10, "fp_digs")
+  set a = add_reg(a, 10, 3)
+  set a = movzx_reg_byte_mem(a, 0, 10, 0)
+  set a = add_reg_imm8(a, 0, 48)
+  set a = mov_mem8_reg(a, 15, 0, 0)
+  set a = inc_reg(a, 15)
+  set a = cmp_reg(a, 3, 14)
+  set a = je(a, "fp_down_done_mixed")
+  set a = dec_reg(a, 3)
+  set a = jmp_label(a, "fp_down_mixed")
+  set a = label(a, "fp_down_done_mixed")
+  set a = jmp_label(a, "fp_emit")
+  set a = label(a, "fp_fixed_int")
+  set a = mov_reg_reg(a, 3, 14)
+  set a = add_reg(a, 3, 12)
+  set a = dec_reg(a, 3)
+  set a = label(a, "fp_down_int")
+  set a = lea_rip(a, 10, "fp_digs")
+  set a = add_reg(a, 10, 3)
+  set a = movzx_reg_byte_mem(a, 0, 10, 0)
+  set a = add_reg_imm8(a, 0, 48)
+  set a = mov_mem8_reg(a, 15, 0, 0)
+  set a = inc_reg(a, 15)
+  set a = cmp_reg(a, 3, 14)
+  set a = je(a, "fp_down_done_int")
+  set a = dec_reg(a, 3)
+  set a = jmp_label(a, "fp_down_int")
+  set a = label(a, "fp_down_done_int")
+  set a = mov_reg_reg(a, 11, 13)
+  set a = sub_reg(a, 11, 12)
+  set a = inc_reg(a, 11)
+  set a = label(a, "fp_z_int")
+  set a = test_reg(a, 11, 11)
+  set a = jz(a, "fp_z_done_int")
+  set a = mov_reg_imm32(a, 0, 48)
+  set a = mov_mem8_reg(a, 15, 0, 0)
+  set a = inc_reg(a, 15)
+  set a = dec_reg(a, 11)
+  set a = jmp_label(a, "fp_z_int")
+  set a = label(a, "fp_z_done_int")
+  set a = mov_reg_imm32(a, 0, 46)
+  set a = mov_mem8_reg(a, 15, 0, 0)
+  set a = inc_reg(a, 15)
+  set a = mov_reg_imm32(a, 0, 48)
+  set a = mov_mem8_reg(a, 15, 0, 0)
+  set a = inc_reg(a, 15)
+  set a = jmp_label(a, "fp_emit")
+  set a = label(a, "fp_frac")
+  set a = mov_reg_imm32(a, 0, 48)
+  set a = mov_mem8_reg(a, 15, 0, 0)
+  set a = inc_reg(a, 15)
+  set a = mov_reg_imm32(a, 0, 46)
+  set a = mov_mem8_reg(a, 15, 0, 0)
+  set a = inc_reg(a, 15)
+  set a = mov_reg_reg(a, 11, 13)
+  set a = neg_reg(a, 11)
+  set a = dec_reg(a, 11)
+  set a = label(a, "fp_z_frac")
+  set a = test_reg(a, 11, 11)
+  set a = jz(a, "fp_z_done_frac")
+  set a = mov_reg_imm32(a, 0, 48)
+  set a = mov_mem8_reg(a, 15, 0, 0)
+  set a = inc_reg(a, 15)
+  set a = dec_reg(a, 11)
+  set a = jmp_label(a, "fp_z_frac")
+  set a = label(a, "fp_z_done_frac")
+  set a = mov_reg_reg(a, 3, 14)
+  set a = add_reg(a, 3, 12)
+  set a = dec_reg(a, 3)
+  set a = label(a, "fp_down_frac")
+  set a = lea_rip(a, 10, "fp_digs")
+  set a = add_reg(a, 10, 3)
+  set a = movzx_reg_byte_mem(a, 0, 10, 0)
+  set a = add_reg_imm8(a, 0, 48)
+  set a = mov_mem8_reg(a, 15, 0, 0)
+  set a = inc_reg(a, 15)
+  set a = cmp_reg(a, 3, 14)
+  set a = je(a, "fp_down_done_frac")
+  set a = dec_reg(a, 3)
+  set a = jmp_label(a, "fp_down_frac")
+  set a = label(a, "fp_down_done_frac")
+  set a = jmp_label(a, "fp_emit")
+  set a = label(a, "fp_sci")
+  set a = mov_reg_reg(a, 3, 14)
+  set a = add_reg(a, 3, 12)
+  set a = dec_reg(a, 3)
+  set a = lea_rip(a, 10, "fp_digs")
+  set a = add_reg(a, 10, 3)
+  set a = movzx_reg_byte_mem(a, 0, 10, 0)
+  set a = add_reg_imm8(a, 0, 48)
+  set a = mov_mem8_reg(a, 15, 0, 0)
+  set a = inc_reg(a, 15)
+  set a = cmp_reg_imm8(a, 12, 1)
+  set a = jle(a, "fp_sci_exp")
+  set a = mov_reg_imm32(a, 0, 46)
+  set a = mov_mem8_reg(a, 15, 0, 0)
+  set a = inc_reg(a, 15)
+  set a = dec_reg(a, 3)
+  set a = label(a, "fp_down_sci")
+  set a = lea_rip(a, 10, "fp_digs")
+  set a = add_reg(a, 10, 3)
+  set a = movzx_reg_byte_mem(a, 0, 10, 0)
+  set a = add_reg_imm8(a, 0, 48)
+  set a = mov_mem8_reg(a, 15, 0, 0)
+  set a = inc_reg(a, 15)
+  set a = cmp_reg(a, 3, 14)
+  set a = je(a, "fp_down_done_sci")
+  set a = dec_reg(a, 3)
+  set a = jmp_label(a, "fp_down_sci")
+  set a = label(a, "fp_down_done_sci")
+  set a = label(a, "fp_sci_exp")
+  set a = mov_reg_imm32(a, 0, 101)
+  set a = mov_mem8_reg(a, 15, 0, 0)
+  set a = inc_reg(a, 15)
+  set a = test_reg(a, 13, 13)
+  set a = jl(a, "fp_sci_neg")
+  set a = mov_reg_imm32(a, 0, 43)
+  set a = mov_mem8_reg(a, 15, 0, 0)
+  set a = inc_reg(a, 15)
+  set a = mov_reg_reg(a, 0, 13)
+  set a = jmp_label(a, "fp_sci_abs")
+  set a = label(a, "fp_sci_neg")
+  set a = mov_reg_imm32(a, 0, 45)
+  set a = mov_mem8_reg(a, 15, 0, 0)
+  set a = inc_reg(a, 15)
+  set a = mov_reg_reg(a, 0, 13)
+  set a = neg_reg(a, 0)
+  set a = label(a, "fp_sci_abs")
+  set a = lea_rip(a, 10, "fp_scratch")
+  set a = xor_reg(a, 3, 3)
+  set a = label(a, "fp_exp_div")
+  set a = xor_reg(a, 2, 2)
+  set a = mov_reg_imm32(a, 1, 10)
+  set a = udiv_reg(a, 1)
+  set a = add_reg_imm8(a, 2, 48)
+  set a = mov_reg_reg(a, 11, 10)
+  set a = add_reg(a, 11, 3)
+  set a = mov_mem8_reg(a, 11, 0, 2)
+  set a = inc_reg(a, 3)
+  set a = test_reg(a, 0, 0)
+  set a = jnz(a, "fp_exp_div")
+  set a = cmp_reg_imm8(a, 3, 1)
+  set a = jne(a, "fp_exp_out")
+  set a = mov_reg_reg(a, 11, 10)
+  set a = add_reg(a, 11, 3)
+  set a = mov_reg_imm32(a, 0, 48)
+  set a = mov_mem8_reg(a, 11, 0, 0)
+  set a = inc_reg(a, 3)
+  set a = label(a, "fp_exp_out")
+  set a = label(a, "fp_exp_rev")
+  set a = dec_reg(a, 3)
+  set a = mov_reg_reg(a, 11, 10)
+  set a = add_reg(a, 11, 3)
+  set a = movzx_reg_byte_mem(a, 0, 11, 0)
+  set a = mov_mem8_reg(a, 15, 0, 0)
+  set a = inc_reg(a, 15)
+  set a = test_reg(a, 3, 3)
+  set a = jnz(a, "fp_exp_rev")
+  set a = jmp_label(a, "fp_emit")
+  set a = label(a, "fp_zero")
+  set a = lea_rip(a, 15, "fbuf")
+  set a = mov_reg_imm32(a, 0, 48)
+  set a = mov_mem8_reg(a, 15, 0, 0)
+  set a = inc_reg(a, 15)
+  set a = mov_reg_imm32(a, 0, 46)
+  set a = mov_mem8_reg(a, 15, 0, 0)
+  set a = inc_reg(a, 15)
+  set a = mov_reg_imm32(a, 0, 48)
+  set a = mov_mem8_reg(a, 15, 0, 0)
+  set a = inc_reg(a, 15)
+  set a = label(a, "fp_emit")
+  set a = lea_rip(a, 12, "fbuf")
+  set a = mov_reg_reg(a, 13, 15)
+  set a = sub_reg(a, 13, 12)
+  set a = mov_mem_reg(a, 5, 184, 12)
+  set a = mov_mem_reg(a, 5, 192, 13)
+  set a = mov_reg_reg(a, 1, 13)
+  set a = call_label(a, "alloc")
+  set a = mov_mem_reg(a, 5, 200, 0)
+  set a = mov_reg_reg(a, 1, 0)
+  set a = mov_reg_mem(a, 2, 5, 184)
+  set a = mov_reg_mem(a, 8, 5, 192)
+  set a = call_label(a, "memcpy")
+  set a = mov_reg_mem(a, 0, 5, 200)
+  set a = mov_reg_mem(a, 2, 5, 192)
+  set a = call_label(a, "push_bytes")
+  set a = jmp_label(a, "dispatch")
+  set a = label(a, "fp_floordiv")
+  set a = mov_reg_reg(a, 10, 0)
+  set a = mov_reg_imm32(a, 1, 30103)
+  set a = imul_reg(a, 0, 1)
+  set a = cqo(a)
+  set a = mov_reg_imm32(a, 1, 100000)
+  set a = idiv_reg(a, 1)
+  set a = test_reg(a, 10, 10)
+  set a = jge(a, "fp_floor_done")
+  set a = test_reg(a, 2, 2)
+  set a = jz(a, "fp_floor_done")
+  set a = dec_reg(a, 0)
+  set a = label(a, "fp_floor_done")
+  set a = ret(a)
   return a
 end
 
@@ -2490,7 +3471,7 @@ fn emit_rows(src: unit) -> unit
   set a = cmp_reg(a, 0, 1)
   set a = jnz(a, "map_key_no")
   set a = cmp_reg_imm8(a, 0, 3)
-  set a = je(a, "map_key_no")
+  set a = je(a, "map_key_f64")
   set a = cmp_reg_imm8(a, 0, 1)
   set a = je(a, "map_key_bytes")
   set a = mov_reg_mem(a, 0, 10, 8)
@@ -2511,6 +3492,16 @@ fn emit_rows(src: unit) -> unit
   set a = mov_reg_reg(a, 11, 8)
   set a = mov_reg_reg(a, 1, 0)
   set a = call_label(a, "memeq")
+  set a = ret(a)
+  set a = label(a, "map_key_f64")
+  set a = mov_reg_mem(a, 0, 10, 8)
+  set a = mov_reg_mem(a, 2, 11, 8)
+  set a = movq_xmm_reg(a, 0, 0)
+  set a = movq_xmm_reg(a, 1, 2)
+  set a = xor_reg(a, 0, 0)
+  set a = ucomisd(a, 0, 1)
+  set a = jp(a, "map_key_no")
+  set a = setcc(a, 148, 0)
   set a = ret(a)
   set a = label(a, "map_key_no")
   set a = xor_reg(a, 0, 0)
@@ -3029,7 +4020,14 @@ fn classify(text: bytes, i: i64) -> i64
     return pack_tok(1, i, scan_ident(text, i))
   end
   if is_digit(c)
-    return pack_tok(2, i, scan_digits(text, i))
+    let dend = scan_digits(text, i)
+    if at_or(text, dend) == 46
+      if is_digit(at_or(text, dend + 1 else fail "math"))
+        let fend = scan_digits(text, dend + 1 else fail "math")
+        return pack_tok(22, i, fend)
+      end
+    end
+    return pack_tok(2, i, dend)
   end
   if c == 43
     if at_or(text, i + 1) == 43
@@ -3428,6 +4426,221 @@ fn push_bytes(p: prog, data: bytes) -> prog
   return take_code(q, byte(5) ++ u16(idx))
 end
 
+fn f64_key(bits: i64) -> bytes
+  return byte(3) ++ q8(bits)
+end
+
+fn intern_f64(p: prog, bits: i64) -> prog
+  let key = f64_key(bits)
+  if seek_buf(p.cold.pack.smap, key) >= 0
+    return p
+  end
+  let rec = pool_rec(3, bits, 0, 0)
+  let pbuf = badd(p.cold.pack.pbuf, rec)
+  let smap = badd(p.cold.pack.smap, q8(p.cold.pack.nconst) ++ u16(len(key)) ++ key)
+  return with_pool_b(p, pbuf, p.cold.pack.nconst + 1 else fail "math", p.cold.pack.strs, p.cold.pack.bmap, smap)
+end
+
+fn push_f64(p: prog, bits: i64) -> prog
+  let saved = intern_f64(p, bits)
+  let key = f64_key(bits)
+  let idx = seek_buf(saved.cold.pack.smap, key)
+  if idx < 0
+    fail "const"
+  end
+  return take_code(saved, byte(5) ++ u16(idx))
+end
+
+fn float_bits(text: bytes) -> i64
+  let nlen = len(text)
+  let i = 0
+  let n = 0
+  let frac = -1
+  let saw = 0
+  let ch = 0
+  let dig = 0
+  let room = 0
+  let den = 1
+  let k = 0
+  let exp = 0
+  let lim = 4611686018427387903
+  let p62 = 4611686018427387904
+  let imax = 9223372036854775807
+  let twice = 0
+  let growing = 1
+  let rem = 0
+  let bits52 = 0
+  let step = 0
+  let bit = 0
+  let extra = 0
+  let addn = 0
+  let mant = 0
+  let odd = 0
+  let biased = 0
+  let fracb = 0
+  let high = 0
+  while i < nlen
+    set ch = at(text, i) else fail "bad float"
+    if ch == 46
+      if frac >= 0
+        fail "bad float"
+      end
+      set frac = 0
+    else
+      if ch < 48
+        fail "bad float"
+      end
+      if ch > 57
+        fail "bad float"
+      end
+      set dig = ch - 48 else fail "math"
+      if n != 0
+        if n > 922337203685477580
+          fail "bad float"
+        end
+        set n = n * 10 else fail "math"
+        set room = imax - n else fail "math"
+        if dig > room
+          fail "bad float"
+        end
+        set n = n + dig else fail "math"
+      end
+      if n == 0
+        if dig != 0
+          set n = dig
+        end
+      end
+      if frac >= 0
+        set frac = frac + 1 else fail "math"
+        if frac > 18
+          fail "bad float"
+        end
+      end
+      set saw = saw + 1 else fail "math"
+    end
+    set i = i + 1 else fail "math"
+  end
+  if frac < 1
+    fail "bad float"
+  end
+  if saw < 2
+    fail "bad float"
+  end
+  if n == 0
+    return 0
+  end
+  set k = 0
+  while k < frac
+    set den = den * 10 else fail "math"
+    set k = k + 1 else fail "math"
+  end
+  while n < den
+    set n = n * 2 else fail "math"
+    set exp = exp - 1 else fail "math"
+  end
+  set growing = 1
+  while growing == 1
+    if den > lim
+      set growing = 0
+    else
+      set twice = den * 2 else fail "math"
+      if n < twice
+        set growing = 0
+      else
+        set den = twice
+        set exp = exp + 1 else fail "math"
+      end
+    end
+  end
+  set rem = n - den else fail "math"
+  set bits52 = 0
+  set step = 0
+  while step < 52
+    if rem <= lim
+      set twice = rem * 2 else fail "math"
+      if twice >= den
+        set bit = 1
+        set rem = twice - den else fail "math"
+      else
+        set bit = 0
+        set rem = twice
+      end
+    else
+      set bit = 1
+      set extra = rem - p62 else fail "math"
+      set extra = extra * 2 else fail "math"
+      set addn = den - 1 else fail "math"
+      set addn = imax - addn else fail "math"
+      set rem = extra + addn else fail "math"
+    end
+    set bits52 = bits52 * 2 else fail "math"
+    set bits52 = bits52 + bit else fail "math"
+    set step = step + 1 else fail "math"
+  end
+  if rem <= lim
+    set twice = rem * 2 else fail "math"
+    if twice >= den
+      set bit = 1
+      set rem = twice - den else fail "math"
+    else
+      set bit = 0
+      set rem = twice
+    end
+  else
+    set bit = 1
+    set extra = rem - p62 else fail "math"
+    set extra = extra * 2 else fail "math"
+    set addn = den - 1 else fail "math"
+    set addn = imax - addn else fail "math"
+    set rem = extra + addn else fail "math"
+  end
+  set mant = 4503599627370496 + bits52 else fail "math"
+  set odd = mant / 2 else fail "math"
+  set odd = odd * 2 else fail "math"
+  set odd = mant - odd else fail "math"
+  if bit != 0
+    if rem != 0
+      set mant = mant + 1 else fail "math"
+    end
+    if rem == 0
+      if odd != 0
+        set mant = mant + 1 else fail "math"
+      end
+    end
+  end
+  if mant == 9007199254740992
+    set mant = 4503599627370496
+    set exp = exp + 1 else fail "math"
+  end
+  if exp > 1023
+    fail "bad float"
+  end
+  if exp < -1022
+    return 0
+  end
+  set biased = exp + 1023 else fail "math"
+  set fracb = mant - 4503599627370496 else fail "math"
+  set high = biased * 4503599627370496 else fail "math"
+  return high + fracb else fail "math"
+end
+
+fn tok_float(toks: toks, index: i64) -> i64
+  if index < 0
+    fail "token"
+  end
+  if index >= toks.count
+    fail "token"
+  end
+  let packed = locate(toks.raw, index)
+  if packed_kind(packed) != 22
+    fail "bad float"
+  end
+  let start = packed_start(packed)
+  let stop = packed_end(packed)
+  let raw = span(toks.raw, start, stop - start else fail "math")
+  return float_bits(raw)
+end
+
 fn slot_index(raw: i64) -> i64
   if raw >= 1024
     let kind = raw / 1024 else fail "math"
@@ -3513,6 +4726,9 @@ fn read_type(p: prog, toks: toks, pos: i64) -> parsed
   end
   if eqb(name, "bytes")
     return made(p, pos + 1 else fail "math", 2)
+  end
+  if eqb(name, "f64")
+    return made(p, pos + 1 else fail "math", 4)
   end
   if eqb(name, "list")
     let inner = read_type(p, toks, pos + 1 else fail "math")
@@ -3780,6 +4996,11 @@ fn parse_atom(p: prog, toks: toks, pos: i64) -> parsed
     let nxt2 = push_bytes(p, tok_text(toks, pos))
     return made(nxt2, pos + 1 else fail "math", 2)
   end
+  if kind == 22
+    let fbits = tok_float(toks, pos)
+    let nxtf = push_f64(p, fbits)
+    return made(nxtf, pos + 1 else fail "math", 4)
+  end
   if kind == 6
     let inner = parse_expr(p, toks, pos + 1 else fail "math")
     if tok_is(toks, inner.pos, 7) == 0
@@ -3805,10 +5026,16 @@ fn parse_atom(p: prog, toks: toks, pos: i64) -> parsed
   if kind == 11
     let unary = parse_atom(p, toks, pos + 1 else fail "math")
     if unary.kind != 1
-      fail "type"
+      if unary.kind != 4
+        fail "type"
+      end
     end
-    let negated = emit_iffail(take_code(unary.prog, byte(17)))
-    return made(negated, unary.pos, 1)
+    let uop = 17
+    if unary.kind == 4
+      set uop = 42
+    end
+    let negated = emit_iffail(take_code(unary.prog, byte(uop)))
+    return made(negated, unary.pos, unary.kind)
   end
   fail "bad expression"
   return made(p, pos, 0)
@@ -3844,7 +5071,40 @@ fn parse_arg(p: prog, toks: toks, pos: i64) -> parsed
 end
 
 fn parse_i64_call(p: prog, toks: toks, pos: i64) -> parsed
-  return parse_one(p, toks, pos, 2, 20, 1)
+  if tok_is(toks, pos + 1 else fail "math", 6) == 0
+    fail "expected ("
+  end
+  let cur = parse_expr(p, toks, pos + 2 else fail "math")
+  if tok_is(toks, cur.pos, 7) == 0
+    fail "expected )"
+  end
+  let op = 0
+  if cur.kind == 2
+    set op = 20
+  end
+  if cur.kind == 4
+    set op = 45
+  end
+  if op == 0
+    fail "type"
+  end
+  let done = emit_iffail(take_code(cur.prog, byte(op)))
+  return made(done, cur.pos + 1 else fail "math", 1)
+end
+
+fn parse_f64_call(p: prog, toks: toks, pos: i64) -> parsed
+  if tok_is(toks, pos + 1 else fail "math", 6) == 0
+    fail "expected ("
+  end
+  let cur = parse_expr(p, toks, pos + 2 else fail "math")
+  if cur.kind != 1
+    fail "type"
+  end
+  if tok_is(toks, cur.pos, 7) == 0
+    fail "expected )"
+  end
+  let done = emit_iffail(take_code(cur.prog, byte(44)))
+  return made(done, cur.pos + 1 else fail "math", 4)
 end
 
 fn parse_len(p: prog, toks: toks, pos: i64) -> parsed
@@ -3930,6 +5190,9 @@ fn parse_call(p: prog, toks: toks, pos: i64) -> parsed
   end
   if eqb(name, "i64")
     return parse_i64_call(p, toks, pos)
+  end
+  if eqb(name, "f64")
+    return parse_f64_call(p, toks, pos)
   end
   if eqb(name, "len")
     return parse_len(p, toks, pos)
@@ -4204,14 +5467,25 @@ fn parse_product(p: prog, toks: toks, pos: i64) -> parsed
   let op = product_op(toks, cur.pos)
   while op != 0
     if cur.kind != 1
-      fail "type"
+      if cur.kind != 4
+        fail "type"
+      end
     end
     let right = parse_atom(cur.prog, toks, cur.pos + 1 else fail "math")
-    if right.kind != 1
+    if right.kind != cur.kind
       fail "type"
     end
-    let done = emit_iffail(take_code(right.prog, byte(op)))
-    set cur = made(done, right.pos, 1)
+    let opc = op
+    if cur.kind == 4
+      if op == 15
+        set opc = 40
+      end
+      if op == 16
+        set opc = 41
+      end
+    end
+    let done = emit_iffail(take_code(right.prog, byte(opc)))
+    set cur = made(done, right.pos, cur.kind)
     set op = product_op(toks, cur.pos)
   end
   return cur
@@ -4637,14 +5911,25 @@ fn parse_sum(p: prog, toks: toks, pos: i64) -> parsed
   let op = sum_op(toks, cur.pos)
   while op != 0
     if cur.kind != 1
-      fail "type"
+      if cur.kind != 4
+        fail "type"
+      end
     end
     let right = parse_product(cur.prog, toks, cur.pos + 1 else fail "math")
-    if right.kind != 1
+    if right.kind != cur.kind
       fail "type"
     end
-    let added = emit_iffail(take_code(right.prog, byte(op)))
-    set cur = made(added, right.pos, 1)
+    let opc = op
+    if cur.kind == 4
+      if op == 13
+        set opc = 38
+      end
+      if op == 14
+        set opc = 39
+      end
+    end
+    let added = emit_iffail(take_code(right.prog, byte(opc)))
+    set cur = made(added, right.pos, cur.kind)
     set op = sum_op(toks, cur.pos)
   end
   return cur
@@ -4674,6 +5959,9 @@ fn emit_write(p: prog, toks: toks) -> prog
   end
   let outp = cur
   if cur.kind == 1
+    set outp = do_dec(cur)
+  end
+  if cur.kind == 4
     set outp = do_dec(cur)
   end
   return take_code(outp.prog, byte(1))
@@ -4798,6 +6086,9 @@ fn parse_fail_expr(p: prog, toks: toks, pos: i64) -> parsed
   if msg.kind == 1
     set shown = do_dec(msg)
   end
+  if msg.kind == 4
+    set shown = do_dec(msg)
+  end
   let op = 32
   if p.cold.pack.is_main != 0
     set op = 2
@@ -4818,8 +6109,22 @@ fn parse_cmp(p: prog, toks: toks, pos: i64) -> parsed
     return cur
   end
   let right = parse_sum(cur.prog, toks, cur.pos + 1 else fail "math")
-  let code = k - 13 else fail "math"
-  let cmpd = take_code(right.prog, byte(18) ++ byte(code))
+  if cur.kind == 4
+    if right.kind != 4
+      fail "type"
+    end
+  end
+  if right.kind == 4
+    if cur.kind != 4
+      fail "type"
+    end
+  end
+  let cmpc = k - 13 else fail "math"
+  let opb = 18
+  if cur.kind == 4
+    set opb = 43
+  end
+  let cmpd = take_code(right.prog, byte(opb) ++ byte(cmpc))
   return made(cmpd, right.pos, 1)
 end
 
@@ -4829,9 +6134,15 @@ fn parse_concat(p: prog, toks: toks, pos: i64) -> parsed
     if cur.kind == 1
       set cur = do_dec(cur)
     end
+    if cur.kind == 4
+      set cur = do_dec(cur)
+    end
     let right = parse_cmp(cur.prog, toks, cur.pos + 1 else fail "math")
     let rhs = right
     if right.kind == 1
+      set rhs = do_dec(right)
+    end
+    if right.kind == 4
       set rhs = do_dec(right)
     end
     let cat = emit_cat(rhs.prog)
@@ -4920,6 +6231,9 @@ fn atom_base(toks: toks, pos: i64) -> i64
   end
   let k = tok_kind(toks, pos)
   if k == 2
+    return 1
+  end
+  if k == 22
     return 1
   end
   if k == 3
@@ -5020,6 +6334,15 @@ fn paint_atom(p: prog, toks: toks, pos: i64, seen: i64) -> flat
     end
     return emit_flat(nxt2, byte(5) ++ u16(sx), pos + 1 else fail "math", 2, none, none, seen)
   end
+  if pk == 22
+    let fbits = tok_float(toks, pos)
+    let nxtf = intern_f64(p, fbits)
+    let fslot = seek_buf(nxtf.cold.pack.smap, f64_key(fbits))
+    if fslot < 0
+      fail "const"
+    end
+    return emit_flat(nxtf, byte(5) ++ u16(fslot), pos + 1 else fail "math", 4, none, none, seen)
+  end
   if pk == 1
     if tok_eq(toks, pos, "reason")
       return emit_flat(p, byte(29), pos + 1 else fail "math", 2, none, none, seen)
@@ -5060,8 +6383,8 @@ fn flat_call(p: prog, toks: toks, pos: i64, name: bytes, failto: bytes, seen: i6
     if eqb(name, "arg")
       set want = 1
     end
-    if eqb(name, "i64")
-      set want = 2
+    if eqb(name, "f64")
+      set want = 1
     end
     if eqb(name, "byte")
       set want = 1
@@ -5171,6 +6494,16 @@ fn flat_call(p: prog, toks: toks, pos: i64, name: bytes, failto: bytes, seen: i6
         end
         set code = code ++ byte(5) ++ u16(sx)
         set akind = 2
+      end
+      if pk == 22
+        let fbits = tok_float(toks, atp)
+        set prog = intern_f64(prog, fbits)
+        let fslot = seek_buf(prog.cold.pack.smap, f64_key(fbits))
+        if fslot < 0
+          fail "const"
+        end
+        set code = code ++ byte(5) ++ u16(fslot)
+        set akind = 4
       end
       if pk == 1
         if tok_eq(toks, atp, "reason")
@@ -5282,8 +6615,30 @@ fn flat_call(p: prog, toks: toks, pos: i64, name: bytes, failto: bytes, seen: i6
     if got != 1
       fail "arity"
     end
-    set tail = byte(20)
+    if k0 == 2
+      set tail = byte(20)
+    end
+    if k0 == 4
+      set tail = byte(45)
+    end
+    if k0 != 2
+      if k0 != 4
+        fail "type"
+      end
+    end
     set outk = 1
+    set iff = 1
+    set done = 1
+  end
+  if eqb(name, "f64")
+    if got != 1
+      fail "arity"
+    end
+    if k0 != 1
+      fail "type"
+    end
+    set tail = byte(44)
+    set outk = 4
     set iff = 1
     set done = 1
   end
@@ -5561,9 +6916,15 @@ fn flat_parse(p: prog, toks: toks, pos: i64, failto: bytes, seen: i64, level: i6
       return unary
     end
     if unary.kind != 1
-      fail "type"
+      if unary.kind != 4
+        fail "type"
+      end
     end
-    let ucall = unary.code ++ byte(17)
+    let uop = 17
+    if unary.kind == 4
+      set uop = 42
+    end
+    let ucall = unary.code ++ byte(uop)
     let urel = len(ucall) + 1 else fail "math"
     set code = ucall ++ byte(11) ++ z4()
     set jumps = push(unary.jumps, jnote(urel, failto))
@@ -5571,7 +6932,7 @@ fn flat_parse(p: prog, toks: toks, pos: i64, failto: bytes, seen: i64, level: i6
     set prog = unary.prog
     set atp = unary.pos
     set sn = unary.seen
-    set kind = 1
+    set kind = unary.kind
   else
     if kt == 6
       let inner = flat_expr(prog, toks, pos + 1 else fail "math", failto, sn)
@@ -5598,6 +6959,9 @@ fn flat_parse(p: prog, toks: toks, pos: i64, failto: bytes, seen: i64, level: i6
           end
           let mcode = msg.code
           if msg.kind == 1
+            set mcode = mcode ++ byte(34)
+          end
+          if msg.kind == 4
             set mcode = mcode ++ byte(34)
           end
           let fop = 32
@@ -5663,7 +7027,19 @@ fn flat_parse(p: prog, toks: toks, pos: i64, failto: bytes, seen: i64, level: i6
             set kind = 2
             set atp = pos + 1 else fail "math"
           else
-            fail "bad expression"
+            if kt == 22
+              let fbits = tok_float(toks, pos)
+              set prog = intern_f64(prog, fbits)
+              let fslot = seek_buf(prog.cold.pack.smap, f64_key(fbits))
+              if fslot < 0
+                fail "const"
+              end
+              set code = byte(5) ++ u16(fslot)
+              set kind = 4
+              set atp = pos + 1 else fail "math"
+            else
+              fail "bad expression"
+            end
           end
         end
       end
@@ -5771,11 +7147,17 @@ fn flat_parse(p: prog, toks: toks, pos: i64, failto: bytes, seen: i64, level: i6
     else
       if iff != 0
         if kind != 1
-          fail "type"
+          if kind != 4
+            fail "type"
+          end
         end
       end
       if took == 2
         if kind == 1
+          set code = code ++ byte(34)
+          set kind = 2
+        end
+        if kind == 4
           set code = code ++ byte(34)
           set kind = 2
         end
@@ -5812,8 +7194,25 @@ fn flat_parse(p: prog, toks: toks, pos: i64, failto: bytes, seen: i64, level: i6
         set rmarks = deep.marks
       end
       if iff != 0
-        if rkind != 1
+        if kind != rkind
           fail "type"
+        end
+        if rkind != 1
+          if rkind != 4
+            fail "type"
+          end
+        end
+      end
+      if iff == 0
+        if kind == 4
+          if rkind != 4
+            fail "type"
+          end
+        end
+        if rkind == 4
+          if kind != 4
+            fail "type"
+          end
         end
       end
       set jumps = join_notes(jumps, shift_notes(rjumps, shift))
@@ -5826,18 +7225,41 @@ fn flat_parse(p: prog, toks: toks, pos: i64, failto: bytes, seen: i64, level: i6
         if rkind == 1
           set code = code ++ byte(34)
         end
+        if rkind == 4
+          set code = code ++ byte(34)
+        end
         set code = code ++ byte(19)
         set kind = 2
       end
       if took == 1
         if iff != 0
+          if kind == 4
+            if op == 15
+              set op = 40
+            end
+            if op == 16
+              set op = 41
+            end
+            if op == 13
+              set op = 38
+            end
+            if op == 14
+              set op = 39
+            end
+          end
           let callb = code ++ byte(op)
           let orel = len(callb) + 1 else fail "math"
           set code = callb ++ byte(11) ++ z4()
           set jumps = push(jumps, jnote(orel, failto))
           set kind = 1
+          if op >= 38
+            set kind = 4
+          end
         end
         if iff == 0
+          if kind == 4
+            set op = 43
+          end
           set code = code ++ byte(op) ++ byte(cop)
           set kind = 1
         end
@@ -6006,6 +7428,9 @@ fn emit_set_fast(p: prog, toks: toks) -> prog
                   if rhs.kind == 1
                     set body = flat(rhs.prog, rhs.code ++ byte(34), rhs.pos, 2, rhs.jumps, rhs.marks, rhs.seen)
                   end
+                  if rhs.kind == 4
+                    set body = flat(rhs.prog, rhs.code ++ byte(34), rhs.pos, 2, rhs.jumps, rhs.marks, rhs.seen)
+                  end
                   let applied = flat_apply(body, byte(33) ++ u16(slot))
                   let slots = put(applied.cold.slots, name, pack_slot(slot, 2))
                   return with_slots(applied, slots)
@@ -6079,6 +7504,9 @@ fn emit_write_fast(p: prog, toks: toks) -> prog
   end
   let suffix = byte(1)
   if fl.kind == 1
+    set suffix = byte(34) ++ byte(1)
+  end
+  if fl.kind == 4
     set suffix = byte(34) ++ byte(1)
   end
   return flat_apply(fl, suffix)
@@ -6173,6 +7601,9 @@ fn emit_append(p: prog, toks: toks, name: bytes, slot: i64) -> prog
   end
   let right = rhs
   if rhs.kind == 1
+    set right = do_dec(rhs)
+  end
+  if rhs.kind == 4
     set right = do_dec(rhs)
   end
   let slots = put(right.prog.cold.slots, name, pack_slot(slot, 2))
@@ -7350,6 +8781,23 @@ fn link_exe(p: prog) -> bytes
   set s = place(s.data, s.symbols, "mintext", "-9223372036854775808", 1, data_rva)
   set s = place(s.data, s.symbols, "oommsg", "out of memory\n", 1, data_rva)
   set s = place(s.data, s.symbols, "depthmsg", "call depth\n", 1, data_rva)
+  set s = place(s.data, s.symbols, "bn0", zeros(224), 8, data_rva)
+  set s = place(s.data, s.symbols, "bn1", zeros(224), 8, data_rva)
+  set s = place(s.data, s.symbols, "bn2", zeros(224), 8, data_rva)
+  set s = place(s.data, s.symbols, "bn4", zeros(224), 8, data_rva)
+  set s = place(s.data, s.symbols, "fbuf", zeros(64), 8, data_rva)
+  set s = place(s.data, s.symbols, "fp_digs", zeros(40), 8, data_rva)
+  set s = place(s.data, s.symbols, "fp_sig", zeros(8), 8, data_rva)
+  set s = place(s.data, s.symbols, "fp_exp2", zeros(8), 8, data_rva)
+  set s = place(s.data, s.symbols, "fp_est", zeros(8), 8, data_rva)
+  set s = place(s.data, s.symbols, "fp_sign", zeros(8), 8, data_rva)
+  set s = place(s.data, s.symbols, "fp_quot", zeros(8), 8, data_rva)
+  set s = place(s.data, s.symbols, "fp_bits", zeros(8), 8, data_rva)
+  set s = place(s.data, s.symbols, "fp_ndig", zeros(8), 8, data_rva)
+  set s = place(s.data, s.symbols, "fp_try", zeros(8), 8, data_rva)
+  set s = place(s.data, s.symbols, "fp_scratch", zeros(8), 8, data_rva)
+  set s = place(s.data, s.symbols, "fp_scratch2", zeros(8), 8, data_rva)
+  set s = place(s.data, s.symbols, "fp_low", zeros(8), 8, data_rva)
   set s = place(s.data, s.symbols, "mem", mem, 8, data_rva)
   let hint0 = byte(0) ++ byte(0)
   set s = place(s.data, s.symbols, "dllname_kernel32.dll", "kernel32.dll" ++ byte(0), 2, data_rva)
