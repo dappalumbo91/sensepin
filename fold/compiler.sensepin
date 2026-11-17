@@ -134,6 +134,11 @@ struct cursor
   xs: list block
 end
 
+struct brought
+  body: buf
+  seen: list bytes
+end
+
 
 fn low8(n: i64) -> i64
   if n == -9223372036854775808
@@ -6749,6 +6754,9 @@ fn on_line(p: prog, text: bytes) -> prog
     if eqb(head, "struct")
       return with_row(p, p.cold.pack.sname, p.cold.pack.sfld, p.cold.pack.nstruct, "", 0, 3)
     end
+    if eqb(head, "use")
+      fail "use needs a source file"
+    end
     fail "expected fn"
     return p
   end
@@ -7702,9 +7710,296 @@ fn walk_lines(p0: prog, text: bytes, start: i64, stop: i64) -> prog
   return p
 end
 
+fn last_sep(path: bytes) -> i64
+  let i = 0
+  let n = len(path)
+  let cut = -1
+  while i < n
+    let c = at(path, i) else fail "math"
+    if c == 47
+      set cut = i
+    end
+    if c == 92
+      set cut = i
+    end
+    set i = i + 1 else fail "math"
+  end
+  return cut
+end
+
+fn parent_dir(path: bytes) -> bytes
+  let cut = last_sep(path)
+  if cut < 0
+    return ""
+  end
+  return span(path, 0, cut)
+end
+
+fn sep_of(path: bytes) -> i64
+  let i = 0
+  let n = len(path)
+  while i < n
+    let c = at(path, i) else fail "math"
+    if c == 92
+      return 92
+    end
+    set i = i + 1 else fail "math"
+  end
+  return 47
+end
+
+fn is_use_part(part: bytes) -> i64
+  if len(part) == 0
+    return 0
+  end
+  if eqb(part, ".")
+    return 0
+  end
+  if eqb(part, "..")
+    return 0
+  end
+  let i = 0
+  let n = len(part)
+  let ok = 0
+  while i < n
+    let c = at(part, i) else fail "math"
+    set ok = 0
+    if c >= 48
+      if c <= 57
+        set ok = 1
+      end
+    end
+    if c >= 65
+      if c <= 90
+        set ok = 1
+      end
+    end
+    if c >= 97
+      if c <= 122
+        set ok = 1
+      end
+    end
+    if c == 95
+      set ok = 1
+    end
+    if c == 45
+      set ok = 1
+    end
+    if c == 46
+      set ok = 1
+    end
+    if ok == 0
+      return 0
+    end
+    set i = i + 1 else fail "math"
+  end
+  return 1
+end
+
+fn use_path(dir: bytes, rel: bytes) -> bytes
+  if len(rel) == 0
+    fail "use path must stay beside the source"
+  end
+  let c0 = at(rel, 0) else fail "math"
+  if c0 == 47
+    fail "use path must stay beside the source"
+  end
+  if c0 == 92
+    fail "use path must stay beside the source"
+  end
+  if len(rel) >= 2
+    if at(rel, 1) == 58
+      fail "use path must stay beside the source"
+    end
+  end
+  let sep = 47
+  if len(dir) != 0
+    set sep = sep_of(dir)
+  end
+  let out = dir
+  let part = ""
+  let i = 0
+  let n = len(rel)
+  let count = 0
+  while i <= n
+    let c = 0
+    if i < n
+      set c = at(rel, i) else fail "math"
+    end
+    let brk = 0
+    if i == n
+      set brk = 1
+    end
+    if c == 47
+      set brk = 1
+    end
+    if c == 92
+      set brk = 1
+    end
+    if brk == 1
+      if is_use_part(part) == 0
+        fail "use path must stay beside the source"
+      end
+      if len(out) == 0
+        set out = part
+      else
+        set out = out ++ byte(sep) ++ part
+      end
+      set part = ""
+      set count = count + 1 else fail "math"
+    else
+      set part = part ++ byte(c)
+    end
+    set i = i + 1 else fail "math"
+  end
+  if count == 0
+    fail "use path must stay beside the source"
+  end
+  return out
+end
+
+fn bump_depth(text: bytes, depth: i64) -> i64
+  let word = leading_word(text)
+  if eqb(word, "fn")
+    return depth + 1 else fail "math"
+  end
+  if eqb(word, "struct")
+    return depth + 1 else fail "math"
+  end
+  if eqb(word, "if")
+    return depth + 1 else fail "math"
+  end
+  if eqb(word, "while")
+    return depth + 1 else fail "math"
+  end
+  if eqb(word, "for")
+    return depth + 1 else fail "math"
+  end
+  if eqb(word, "end")
+    if depth > 0
+      return depth - 1 else fail "math"
+    end
+  end
+  return depth
+end
+
+fn starts_console(text: bytes) -> i64
+  for line in lines(text)
+    let toks = lex(line.text)
+    if toks.count != 0
+      if toks.count != 2
+        return 0
+      end
+      if eqb(tok_text(toks, 0), "phase") == 0
+        return 0
+      end
+      if eqb(tok_text(toks, 1), "console") == 0
+        return 0
+      end
+      return 1
+    end
+  end
+  return 0
+end
+
+fn has_main(text: bytes) -> i64
+  let depth = 0
+  for line in lines(text)
+    if depth == 0
+      if leading_is(line.text, "fn")
+        let toks = lex(line.text)
+        if toks.count >= 2
+          if eqb(tok_text(toks, 0), "fn")
+            if eqb(tok_text(toks, 1), "main")
+              return 1
+            end
+          end
+        end
+      end
+    end
+    set depth = bump_depth(line.text, depth)
+  end
+  return 0
+end
+
+fn seen_has(xs: list bytes, path: bytes) -> i64
+  for item in xs
+    if eqb(item, path)
+      return 1
+    end
+  end
+  return 0
+end
+
+fn pull(origin: bytes, text: bytes, seen: list bytes, stack: map bytes i64) -> brought
+  if has(stack, origin)
+    fail "use cycle"
+  end
+  let frame = put(stack, origin, 1)
+  let out = bnew()
+  let know = seen
+  let depth = 0
+  for line in lines(text)
+    let toks = lex(line.text)
+    if toks.count == 0
+      set out = badd(out, "\n")
+    else
+      let head = tok_text(toks, 0)
+      if depth == 0
+        if eqb(head, "use")
+          if toks.count != 2
+            fail "expected use \"path\""
+          end
+          if tok_kind(toks, 1) != 3
+            fail "expected use \"path\""
+          end
+          let rel = tok_text(toks, 1)
+          let full = use_path(parent_dir(origin), rel)
+          if eqb(full, origin)
+            fail "use cycle"
+          end
+          if has(frame, full)
+            fail "use cycle"
+          end
+          if seen_has(know, full) == 0
+            let raw = open(full, 1048576, "missing use", "", "file too large\n") else fail "missing use"
+            if starts_console(raw) == 0
+              fail "expected phase console"
+            end
+            let child = pull(full, raw, know, frame)
+            set out = badd(out, bfinish(child.body))
+            set know = child.seen
+            set know = push(know, full)
+          end
+        else
+          set out = badd(out, line.text)
+          set out = badd(out, "\n")
+          set depth = bump_depth(line.text, depth)
+        end
+      else
+        set out = badd(out, line.text)
+        set out = badd(out, "\n")
+        set depth = bump_depth(line.text, depth)
+      end
+    end
+  end
+  return brought(out, know)
+end
+
 fn run_full() -> i64
-  let src = open(arg(1), 1048576, "cannot open ", "", "file too large\n") else fail reason
-  let compiled = compile(src)
+  let path = arg(1)
+  let src = open(path, 1048576, "cannot open ", "", "file too large\n") else fail reason
+  if has_main(src) == 0
+    fail "missing main"
+  end
+  let none: list bytes = list()
+  let pile: map bytes i64 = map()
+  let got = pull(path, src, none, pile)
+  let joined = bfinish(got.body)
+  if len(joined) > 1048576
+    fail "file too large"
+  end
+  let compiled = compile(joined)
   let image = link_exe(compiled)
   let wrote = save(arg(2), image) else fail reason
   return wrote
