@@ -17,6 +17,8 @@ struct buf
   part: bytes
   fills: i64
   count: i64
+  mid: bytes
+  mfills: i64
 end
 
 struct unit
@@ -94,6 +96,8 @@ struct prog
   count: i64
   jumps: buf
   cold: cold
+  mid: bytes
+  mfills: i64
 end
 
 struct parsed
@@ -3212,7 +3216,7 @@ end
 
 fn spawn(code: bytes, pool: bytes, nconst: i64, strs: buf, funcs: buf, jumps: buf, marks: buf, imap: bytes, bmap: buf, smap: buf, fnames: buf, arity: buf, slots: map bytes i64, unwind: bytes, main_off: i64, main_slots: i64, saw_main: i64, live: i64, start: i64, nparams: i64, is_main: i64, seen: i64, cbuf: buf, blocks: list block, failto: bytes, pbuf: buf, sname: map bytes i64, sfld: map bytes i64, nstruct: i64, building: bytes, nfield: i64, rets: buf) -> prog
   let held = cold(code, pool, nconst, strs, funcs, marks, imap, bmap, smap, fnames, arity, slots, unwind, main_off, main_slots, saw_main, live, start, nparams, is_main, seen, cbuf.parts, blocks, failto, pbuf, sname, sfld, nstruct, building, nfield, rets)
-  return prog(cbuf.part, cbuf.fills, cbuf.count, jumps, held)
+  return prog(cbuf.part, cbuf.fills, cbuf.count, jumps, held, cbuf.mid, cbuf.mfills)
 end
 
 fn with_code(p: prog, code: bytes) -> prog
@@ -3289,7 +3293,7 @@ fn close_fn(p: prog) -> prog
 end
 
 fn as_buf(p: prog) -> buf
-  return buf(p.cold.parts, p.part, p.fills, p.count)
+  return buf(p.cold.parts, p.part, p.fills, p.count, p.mid, p.mfills)
 end
 
 fn cold_parts(h: cold, parts: list bytes) -> cold
@@ -3298,17 +3302,22 @@ end
 
 fn tack(p: prog, jumps: buf, extra: bytes) -> prog
   if len(extra) == 0
-    return prog(p.part, p.fills, p.count, jumps, p.cold)
+    return prog(p.part, p.fills, p.count, jumps, p.cold, p.mid, p.mfills)
   end
   let part = p.part ++ extra
   let fills = p.fills + 1 else fail "math"
   let count = p.count + len(extra) else fail "math"
-  if fills >= 64
-    let parts = push(p.cold.parts, part)
-    let held = cold_parts(p.cold, parts)
-    return prog("", 0, count, jumps, held)
+  if fills >= 8
+    let mid = p.mid ++ part
+    let mf = p.mfills + 1 else fail "math"
+    if mf >= 8
+      let parts = push(p.cold.parts, mid)
+      let held = cold_parts(p.cold, parts)
+      return prog("", 0, count, jumps, held, "", 0)
+    end
+    return prog("", 0, count, jumps, p.cold, mid, mf)
   end
-  return prog(part, fills, count, jumps, p.cold)
+  return prog(part, fills, count, jumps, p.cold, p.mid, p.mfills)
 end
 
 fn take_code(p: prog, extra: bytes) -> prog
@@ -5516,14 +5525,24 @@ end
 
 fn bnew() -> buf
   let parts: list bytes = list()
-  return buf(parts, "", 0, 0)
+  return buf(parts, "", 0, 0, "", 0)
 end
 
 fn bflush(b: buf) -> buf
-  if b.fills == 0
+  let parts = b.parts
+  let moved = 0
+  if b.mfills != 0
+    set parts = push(parts, b.mid)
+    set moved = 1
+  end
+  if b.fills != 0
+    set parts = push(parts, b.part)
+    set moved = 1
+  end
+  if moved == 0
     return b
   end
-  return buf(push(b.parts, b.part), "", 0, b.count)
+  return buf(parts, "", 0, b.count, "", 0)
 end
 
 fn bpush(b: buf, extra: bytes) -> buf
@@ -5532,7 +5551,7 @@ fn bpush(b: buf, extra: bytes) -> buf
   end
   let base = bflush(b)
   let count = base.count + len(extra) else fail "math"
-  return buf(push(base.parts, extra), "", 0, count)
+  return buf(push(base.parts, extra), "", 0, count, "", 0)
 end
 
 fn finish_pool(p: prog) -> prog
@@ -5546,11 +5565,15 @@ fn badd(b: buf, extra: bytes) -> buf
   let part = b.part ++ extra
   let fills = b.fills + 1 else fail "math"
   let count = b.count + len(extra) else fail "math"
-  let next = buf(b.parts, part, fills, count)
-  if fills >= 64
-    return bflush(next)
+  if fills >= 8
+    let mid = b.mid ++ part
+    let mf = b.mfills + 1 else fail "math"
+    if mf >= 8
+      return buf(push(b.parts, mid), "", 0, count, "", 0)
+    end
+    return buf(b.parts, "", 0, count, mid, mf)
   end
-  return next
+  return buf(b.parts, part, fills, count, b.mid, b.mfills)
 end
 
 fn flatten(xs: list bytes) -> bytes
@@ -5581,6 +5604,9 @@ end
 
 fn bfinish(b: buf) -> bytes
   let parts = b.parts
+  if b.mfills != 0
+    set parts = push(parts, b.mid)
+  end
   if b.fills != 0
     set parts = push(parts, b.part)
   end
@@ -5590,9 +5616,9 @@ end
 fn bwrap(data: bytes) -> buf
   let parts: list bytes = list()
   if len(data) == 0
-    return buf(parts, "", 0, 0)
+    return buf(parts, "", 0, 0, "", 0)
   end
-  return buf(parts, data, 1, len(data))
+  return buf(parts, data, 1, len(data), "", 0)
 end
 
 fn zeros(n: i64) -> bytes
@@ -5729,6 +5755,12 @@ fn seek_buf(index: buf, name: bytes) -> i64
     end
     set i = i + 1 else fail "math"
   end
+  if index.mfills != 0
+    let midhit = seek_named(index.mid, name)
+    if midhit >= 0
+      return midhit
+    end
+  end
   return seek_named(index.part, name)
 end
 
@@ -5741,6 +5773,12 @@ fn seek_span_buf(index: buf, text: bytes, atn: i64, nlen: i64) -> i64
       return hit
     end
     set i = i + 1 else fail "math"
+  end
+  if index.mfills != 0
+    let midhit = seek_span(index.mid, text, atn, nlen)
+    if midhit >= 0
+      return midhit
+    end
   end
   return seek_span(index.part, text, atn, nlen)
 end
